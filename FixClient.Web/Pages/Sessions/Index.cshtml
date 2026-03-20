@@ -1,0 +1,107 @@
+@page
+@model FixClient.Web.Pages.SessionsIndexModel
+@{
+    ViewData["Title"] = "Sessions";
+}
+
+<div class="grid grid-2">
+    <div class="card">
+        <div class="card-header"><h2>Create Session</h2></div>
+        <div class="card-body">
+            <form method="post">
+                <div class="form-group">
+                    <label>Behaviour</label>
+                    <select name="Behaviour" class="form-control">
+                        <option>Initiator</option>
+                        <option>Acceptor</option>
+                    </select>
+                </div>
+                <div class="grid grid-2">
+                    <div class="form-group">
+                        <label>SenderCompID</label>
+                        <input type="text" name="SenderCompId" class="form-control" value="SENDER" required />
+                    </div>
+                    <div class="form-group">
+                        <label>TargetCompID</label>
+                        <input type="text" name="TargetCompId" class="form-control" value="TARGET" required />
+                    </div>
+                </div>
+                <div class="grid grid-2">
+                    <div class="form-group">
+                        <label>Host</label>
+                        <input type="text" name="Host" class="form-control" value="127.0.0.1" />
+                    </div>
+                    <div class="form-group">
+                        <label>Port</label>
+                        <input type="number" name="Port" class="form-control" value="9810" />
+                    </div>
+                </div>
+                <div class="grid grid-2">
+                    <div class="form-group">
+                        <label>FIX Version</label>
+                        <select name="BeginString" class="form-control">
+                            @foreach (var v in Model.Versions)
+                            {
+                                <option value="@v" selected="@(v == "FIX.5.0SP2")">@v</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>HeartBtInt</label>
+                        <input type="number" name="HeartBtInt" class="form-control" value="30" />
+                    </div>
+                </div>
+                <div class="toolbar">
+                    <button type="submit" class="btn btn-primary">Create Session</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-header"><h2>Active Sessions (@Model.SessionList.Count)</h2></div>
+        <div class="card-body" style="max-height:50vh;overflow-y:auto;">
+            @if (Model.SessionList.Count == 0)
+            {
+                <div class="empty-state">
+                    <p>No sessions. Create one using the form.</p>
+                </div>
+            }
+            else
+            {
+                @foreach (var s in Model.SessionList)
+                {
+                    <div class="card" style="margin-bottom:0.75rem;border-color:@(s.State == "Disconnected" ? "#334155" : s.State == "LoggedOn" ? "#166534" : "#854d0e");">
+                        <div class="card-body" style="padding:0.75rem;">
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
+                                <div>
+                                    <span class="badge badge-blue">@s.Id</span>
+                                    <strong style="margin-left:0.5rem;">@s.SenderCompId ? @s.TargetCompId</strong>
+                                </div>
+                                <span class="badge @(s.State == "Disconnected" ? "badge-gray" : s.State == "LoggedOn" ? "badge-green" : "badge-amber")">@s.State</span>
+                            </div>
+                            <div style="font-size:0.8rem;color:#64748b;margin-bottom:0.5rem;">
+                                @s.BeginString &middot; @s.Behaviour &middot; @s.Host:@s.Port &middot; HB=@s.HeartBtInt
+                            </div>
+                            <div class="toolbar">
+                                <form method="post" asp-page-handler="Connect" style="display:inline;">
+                                    <input type="hidden" name="SessionId" value="@s.Id" />
+                                    <button type="submit" class="btn btn-primary btn-sm" @(s.State != "Disconnected" ? "disabled" : "")>Connect</button>
+                                </form>
+                                <form method="post" asp-page-handler="Disconnect" style="display:inline;">
+                                    <input type="hidden" name="SessionId" value="@s.Id" />
+                                    <button type="submit" class="btn btn-secondary btn-sm" @(s.State == "Disconnected" ? "disabled" : "")>Disconnect</button>
+                                </form>
+                                <a href="/History?sessionId=@s.Id" class="btn btn-secondary btn-sm">History (@s.HistoryCount)</a>
+                                <a href="/Log?sessionId=@s.Id" class="btn btn-secondary btn-sm">Log (@s.LogCount)</a>
+                                <form method="post" asp-page-handler="Remove" style="display:inline;">
+                                    <input type="hidden" name="SessionId" value="@s.Id" />
+                                    <button type="submit" class="btn btn-secondary btn-sm" style="color:#f87171;">Remove</button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                }
+            }
+        </div>
+    </div>
+</div>

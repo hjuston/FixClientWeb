@@ -1,0 +1,117 @@
+@page
+@model FixClient.Web.Pages.ParserIndexModel
+@{
+    ViewData["Title"] = "FIX Message Parser";
+}
+
+<div class="grid grid-2">
+    <div>
+        <div class="card">
+            <div class="card-header">
+                <h2>Input</h2>
+                <div class="toolbar">
+                    <label style="font-size:0.8rem;color:#94a3b8;display:flex;align-items:center;gap:0.3rem;">
+                        <input type="checkbox" id="showAdmin" checked /> Show admin messages
+                    </label>
+                </div>
+            </div>
+            <div class="card-body">
+                <form method="post" id="parseForm">
+                    <div class="form-group">
+                        <label>Paste FIX messages (raw log data with SOH delimiters, pipe delimiters, or standard FIX format)</label>
+                        <textarea class="form-control" name="RawInput" id="rawInput" rows="15" placeholder="8=FIX.4.2|9=...|35=D|...">@Model.RawInput</textarea>
+                    </div>
+                    <input type="hidden" name="ShowAdminMessages" id="showAdminField" value="@Model.ShowAdminMessages.ToString().ToLower()" />
+                    <div class="toolbar">
+                        <button type="submit" class="btn btn-primary">Parse</button>
+                        <button type="button" class="btn btn-secondary" onclick="clearInput()">Clear</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div>
+        <div class="card">
+            <div class="card-header">
+                <h2>Parsed Output</h2>
+                <span style="font-size:0.8rem;color:#64748b;">@Model.ParsedMessages.Count message(s)</span>
+            </div>
+            <div class="card-body" style="max-height:60vh;overflow-y:auto;">
+                @if (Model.ParsedMessages.Count == 0 && !string.IsNullOrEmpty(Model.RawInput))
+                {
+                    <div class="empty-state">
+                        <p>No messages could be parsed from the input.</p>
+                    </div>
+                }
+                else if (Model.ParsedMessages.Count == 0)
+                {
+                    <div class="empty-state">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                        <p>Paste FIX log data and click Parse to view structured messages.</p>
+                    </div>
+                }
+                else
+                {
+                    @foreach (var msg in Model.ParsedMessages)
+                    {
+                        <div class="msg-block">
+                            <pre>@Html.Raw(msg)</pre>
+                        </div>
+                    }
+                }
+            </div>
+        </div>
+
+        @if (Model.Orders.Count > 0)
+        {
+            <div class="card" style="margin-top:1rem;">
+                <div class="card-header"><h2>Order Book</h2></div>
+                <div class="table-scroll">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>ClOrdID</th>
+                                <th>Symbol</th>
+                                <th>Side</th>
+                                <th>OrderQty</th>
+                                <th>Price</th>
+                                <th>OrdStatus</th>
+                                <th>CumQty</th>
+                                <th>AvgPx</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var order in Model.Orders)
+                            {
+                                <tr>
+                                    <td>@order.ClOrdID</td>
+                                    <td>@order.Symbol</td>
+                                    <td>@order.Side</td>
+                                    <td style="text-align:right;">@order.OrderQty</td>
+                                    <td style="text-align:right;">@order.Price</td>
+                                    <td><span class="badge @order.StatusBadge">@order.OrdStatus</span></td>
+                                    <td style="text-align:right;">@order.CumQty</td>
+                                    <td style="text-align:right;">@order.AvgPx</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@section Scripts {
+<script>
+function clearInput() {
+    document.getElementById('rawInput').value = '';
+}
+document.getElementById('showAdmin').addEventListener('change', function() {
+    document.getElementById('showAdminField').value = this.checked;
+});
+document.getElementById('parseForm').addEventListener('submit', function() {
+    document.getElementById('showAdminField').value = document.getElementById('showAdmin').checked;
+});
+</script>
+}

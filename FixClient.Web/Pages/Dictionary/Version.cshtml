@@ -1,0 +1,54 @@
+@page
+@model FixClient.Web.Pages.DictionaryVersionModel
+@{
+    ViewData["Title"] = Model.BeginString + " Messages";
+}
+
+<div class="breadcrumb">
+    <a href="/Dictionary">Dictionary</a>
+    <span class="separator">/</span>
+    <span>@Model.BeginString</span>
+</div>
+
+<div class="toolbar" style="margin-bottom:1rem;">
+    <div class="search-box" style="flex:1;max-width:400px;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" id="msgSearch" placeholder="Search messages..." class="form-control" style="padding-left:2rem;" oninput="filterMessages()" />
+    </div>
+    <a href="/Fields?beginString=@Uri.EscapeDataString(Model.BeginString)" class="btn btn-secondary btn-sm">View All Fields</a>
+</div>
+
+<div class="card">
+    <div class="table-scroll">
+        <table class="data-table" id="msgTable">
+            <thead>
+                <tr>
+                    <th>MsgType</th>
+                    <th>Name</th>
+                    <th>Added</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var msg in Model.Messages)
+                {
+                    <tr class="msg-row">
+                        <td><span class="badge badge-blue">@msg.MsgType</span></td>
+                        <td><a href="/Dictionary/Message?beginString=@Uri.EscapeDataString(Model.BeginString)&msgType=@Uri.EscapeDataString(msg.MsgType)">@msg.Name</a></td>
+                        <td><span class="badge badge-gray">@msg.Added</span></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+function filterMessages() {
+    const q = document.getElementById('msgSearch').value.toLowerCase();
+    document.querySelectorAll('.msg-row').forEach(r => {
+        r.style.display = r.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+}
+</script>
+}

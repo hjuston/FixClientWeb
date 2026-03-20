@@ -1,0 +1,151 @@
+@page
+@model FixClient.Web.Pages.MessagesIndexModel
+@{
+    ViewData["Title"] = "Message Builder";
+}
+
+<div class="split-panel">
+    <div class="split-left">
+        <div class="card" style="height:100%;display:flex;flex-direction:column;">
+            <div class="card-header">
+                <h2>Message Types</h2>
+            </div>
+            <div style="padding:0.5rem;">
+                <select class="form-control" id="versionSelect" style="margin-bottom:0.5rem;" onchange="location.href='/Messages?beginString='+encodeURIComponent(this.value)">
+                    @foreach (var v in Model.AllVersions)
+                    {
+                        <option value="@v" selected="@(v == Model.BeginString)">@v</option>
+                    }
+                </select>
+                <input type="text" id="msgTypeSearch" placeholder="Search..." class="form-control" oninput="filterMsgTypes()" />
+            </div>
+            <div style="flex:1;overflow-y:auto;">
+                <table class="data-table" id="msgTypeTable">
+                    <tbody>
+                        @foreach (var msg in Model.MessageTypes)
+                        {
+                            var isSelected = msg.MsgType == Model.SelectedMsgType;
+                            <tr class="msgtype-row" style="@(isSelected ? "background:#1a2332;" : "")" >
+                                <td>
+                                    <a href="/Messages?beginString=@Uri.EscapeDataString(Model.BeginString)&msgType=@Uri.EscapeDataString(msg.MsgType)"
+                                       style="@(isSelected ? "color:#38bdf8;font-weight:600;" : "")">
+                                        <span class="badge badge-blue" style="font-size:0.65rem;">@msg.MsgType</span>
+                                        @msg.Name
+                                    </a>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="split-right">
+        @if (Model.SelectedMessage != null)
+        {
+            <div class="card">
+                <div class="card-header">
+                    <h2>@Model.SelectedMessage.Name <span style="color:#64748b;font-weight:normal;font-size:0.8rem;">(@Model.SelectedMessage.MsgType)</span></h2>
+                    <div class="toolbar">
+                        <button class="btn btn-primary btn-sm" onclick="copyMessage()">Copy Raw</button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <p class="field-description" style="margin-bottom:1rem;">@Model.SelectedMessage.Description</p>
+                    <form method="post" id="buildForm">
+                        <input type="hidden" name="BeginString" value="@Model.BeginString" />
+                        <input type="hidden" name="SelectedMsgType" value="@Model.SelectedMsgType" />
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Tag</th>
+                                    <th>Name</th>
+                                    <th>Required</th>
+                                    <th>Value</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @for (int i = 0; i < Model.FieldEditors.Count; i++)
+                                {
+                                    var f = Model.FieldEditors[i];
+                                    <tr>
+                                        <td><span class="badge badge-gray">@f.Tag</span></td>
+                                        <td>
+                                            @if (f.Depth > 0)
+                                            {
+                                                <span style="padding-left:@(f.Depth * 16)px;color:#64748b;">?</span>
+                                            }
+                                            @f.Name
+                                        </td>
+                                        <td>
+                                            @if (f.Required)
+                                            {
+                                                <span class="badge badge-green" style="font-size:0.65rem;">Y</span>
+                                            }
+                                        </td>
+                                        <td>
+                                            @if (f.EnumValues.Count > 0)
+                                            {
+                                                <select name="FieldValues[@i].Value" class="form-control" style="max-width:300px;">
+                                                    <option value="">—</option>
+                                                    @foreach (var ev in f.EnumValues)
+                                                    {
+                                                        <option value="@ev.Value" selected="@(ev.Value == f.Value)">@ev.Value — @ev.Name</option>
+                                                    }
+                                                </select>
+                                            }
+                                            else
+                                            {
+                                                <input type="text" name="FieldValues[@i].Value" value="@f.Value" class="form-control" style="max-width:300px;" />
+                                            }
+                                            <input type="hidden" name="FieldValues[@i].Tag" value="@f.Tag" />
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                        <div class="toolbar" style="margin-top:1rem;">
+                            <button type="submit" class="btn btn-primary">Build Message</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            @if (!string.IsNullOrEmpty(Model.BuiltMessage))
+            {
+                <div class="card" style="margin-top:1rem;">
+                    <div class="card-header"><h2>Raw Message</h2></div>
+                    <div class="card-body">
+                        <pre id="rawOutput">@Model.BuiltMessage</pre>
+                    </div>
+                </div>
+            }
+        }
+        else
+        {
+            <div class="card">
+                <div class="card-body empty-state">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                    <p>Select a message type from the left panel to build a FIX message.</p>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@section Scripts {
+<script>
+function filterMsgTypes() {
+    const q = document.getElementById('msgTypeSearch').value.toLowerCase();
+    document.querySelectorAll('.msgtype-row').forEach(r => {
+        r.style.display = r.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+}
+function copyMessage() {
+    const el = document.getElementById('rawOutput');
+    if (el) {
+        navigator.clipboard.writeText(el.textContent);
+    }
+}
+</script>
+}

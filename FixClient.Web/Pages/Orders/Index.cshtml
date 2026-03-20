@@ -1,0 +1,77 @@
+@page
+@model FixClient.Web.Pages.OrdersIndexModel
+@{
+    ViewData["Title"] = "Orders";
+}
+
+<div class="card">
+    <div class="card-header">
+        <h2>Order Book</h2>
+        <div class="toolbar">
+            <span style="font-size:0.8rem;color:#64748b;">Parse FIX messages to populate the order book</span>
+        </div>
+    </div>
+    <div class="card-body">
+        <form method="post">
+            <div class="form-group">
+                <label>Paste FIX log messages containing order flow (NewOrderSingle, ExecutionReport, etc.)</label>
+                <textarea class="form-control" name="RawInput" rows="6" placeholder="Paste FIX messages here...">@Model.RawInput</textarea>
+            </div>
+            <div class="toolbar">
+                <button type="submit" class="btn btn-primary">Process Orders</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+@if (Model.Orders.Count > 0)
+{
+    <div class="card" style="margin-top:1rem;">
+        <div class="card-header">
+            <h2>Order Book (@Model.Orders.Count orders)</h2>
+            <div class="toolbar">
+                <span class="badge badge-green">@Model.Orders.Count(o => o.Active) active</span>
+                <span class="badge badge-gray">@Model.Orders.Count(o => !o.Active) inactive</span>
+            </div>
+        </div>
+        <div class="table-scroll">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Sender</th>
+                        <th>Target</th>
+                        <th>ClOrdID</th>
+                        <th>Symbol</th>
+                        <th>Side</th>
+                        <th style="text-align:right;">OrderQty</th>
+                        <th style="text-align:right;">Price</th>
+                        <th>OrdStatus</th>
+                        <th style="text-align:right;">CumQty</th>
+                        <th style="text-align:right;">AvgPx</th>
+                        <th>SendingTime</th>
+                        <th>Messages</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var order in Model.Orders)
+                    {
+                        <tr>
+                            <td>@order.SenderCompID</td>
+                            <td>@order.TargetCompID</td>
+                            <td><span class="badge badge-blue">@order.ClOrdID</span></td>
+                            <td>@order.Symbol</td>
+                            <td>@order.Side</td>
+                            <td style="text-align:right;">@order.OrderQty</td>
+                            <td style="text-align:right;">@order.Price</td>
+                            <td><span class="badge @order.StatusBadge">@order.OrdStatus</span></td>
+                            <td style="text-align:right;">@order.CumQty</td>
+                            <td style="text-align:right;">@order.AvgPx</td>
+                            <td style="font-size:0.75rem;">@order.SendingTime</td>
+                            <td>@order.MessageCount</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}

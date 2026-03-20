@@ -1,0 +1,21 @@
+@page
+@model FixClient.Web.Pages.DictionaryIndexModel
+@{
+    ViewData["Title"] = "FIX Dictionary";
+}
+
+<div class="grid grid-3">
+    @foreach (var version in Model.Versions)
+    {
+        <a href="/Dictionary/Version?beginString=@Uri.EscapeDataString(version.BeginString)" style="text-decoration:none;">
+            <div class="card" style="cursor:pointer;transition:border-color 0.15s;">
+                <div class="card-body" style="text-align:center;">
+                    <span class="badge badge-blue" style="font-size:1rem;padding:0.3rem 0.75rem;">@version.BeginString</span>
+                    <div style="margin-top:0.75rem;color:#94a3b8;font-size:0.85rem;">
+                        @version.MessageCount messages &middot; @version.FieldCount fields
+                    </div>
+                </div>
+            </div>
+        </a>
+    }
+</div>

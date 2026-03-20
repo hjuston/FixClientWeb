@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@ViewData["Title"] - FIX Client Web</title>
+    <link rel="stylesheet" href="/css/site.css" />
+</head>
+<body>
+    <div class="app-layout">
+        <nav class="sidebar">
+            <div class="sidebar-header">
+                <a href="/" class="sidebar-brand">FIX Client</a>
+                <span class="sidebar-version">Web</span>
+            </div>
+            <ul class="sidebar-nav">
+                <li class="nav-item @(ViewContext.RouteData.Values["page"]?.ToString() == "/Index" ? "active" : "")">
+                    <a href="/">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                        Dashboard
+                    </a>
+                </li>
+                <li class="nav-section">Dictionary</li>
+                <li class="nav-item @(ViewContext.RouteData.Values["page"]?.ToString()?.StartsWith("/Dictionary") == true ? "active" : "")">
+                    <a href="/Dictionary">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+                        Versions &amp; Messages
+                    </a>
+                </li>
+                <li class="nav-item @(ViewContext.RouteData.Values["page"]?.ToString()?.StartsWith("/Fields") == true ? "active" : "")">
+                    <a href="/Fields">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                        Fields
+                    </a>
+                </li>
+                <li class="nav-section">Tools</li>
+                <li class="nav-item @(ViewContext.RouteData.Values["page"]?.ToString()?.StartsWith("/Parser") == true ? "active" : "")">
+                    <a href="/Parser">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                        Parser
+                    </a>
+                </li>
+                <li class="nav-item @(ViewContext.RouteData.Values["page"]?.ToString()?.StartsWith("/Messages") == true ? "active" : "")">
+                    <a href="/Messages">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                        Message Builder
+                    </a>
+                </li>
+                <li class="nav-item @(ViewContext.RouteData.Values["page"]?.ToString()?.StartsWith("/Orders") == true ? "active" : "")">
+                    <a href="/Orders">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+                        Orders
+                    </a>
+                </li>
+                <li class="nav-section">Session</li>
+                <li class="nav-item @(ViewContext.RouteData.Values["page"]?.ToString()?.StartsWith("/Sessions") == true ? "active" : "")">
+                    <a href="/Sessions">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                        Sessions
+                    </a>
+                </li>
+                <li class="nav-item @(ViewContext.RouteData.Values["page"]?.ToString()?.StartsWith("/History") == true ? "active" : "")">
+                    <a href="/History">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                        History
+                    </a>
+                </li>
+                <li class="nav-item @(ViewContext.RouteData.Values["page"]?.ToString()?.StartsWith("/Filters") == true ? "active" : "")">
+                    <a href="/Filters">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                        Filters
+                    </a>
+                </li>
+                <li class="nav-item @(ViewContext.RouteData.Values["page"]?.ToString()?.StartsWith("/Log") == true ? "active" : "")">
+                    <a href="/Log">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                        Log
+                    </a>
+                </li>
+            </ul>
+        </nav>
+        <main class="main-content">
+            <header class="topbar">
+                <h1 class="page-title">@ViewData["Title"]</h1>
+            </header>
+            <div class="content-area">
+                @RenderBody()
+            </div>
+        </main>
+    </div>
+    @await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

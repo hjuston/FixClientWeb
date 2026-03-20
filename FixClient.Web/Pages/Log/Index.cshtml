@@ -1,0 +1,124 @@
+@page
+@model FixClient.Web.Pages.LogIndexModel
+@{
+    ViewData["Title"] = "Session Log";
+}
+
+@if (!Model.Found)
+{
+    <div class="card">
+        <div class="card-header"><h2>Select a Session</h2></div>
+        <div class="card-body">
+            @if (Model.AllSessions.Count == 0)
+            {
+                <div class="empty-state">
+                    <p>No sessions available. <a href="/Sessions">Create a session</a> first.</p>
+                </div>
+            }
+            else
+            {
+                <div style="display:flex;flex-wrap:wrap;gap:0.75rem;">
+                    @foreach (var s in Model.AllSessions)
+                    {
+                        <a href="/Log?sessionId=@s.Id" class="card" style="flex:0 0 auto;text-decoration:none;border-color:#334155;min-width:200px;">
+                            <div class="card-body" style="padding:0.75rem;">
+                                <div style="font-weight:600;">@s.SenderCompId ? @s.TargetCompId</div>
+                                <div style="font-size:0.8rem;color:#64748b;">
+                                    <span class="badge @(s.State == "LoggedOn" ? "badge-green" : "badge-gray")">@s.State</span>
+                                    &middot; @s.LogCount entries
+                                </div>
+                            </div>
+                        </a>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+}
+else
+{
+    <div class="card">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+            <h2>Log — @Model.SessionLabel</h2>
+            <div>
+                <a href="/Sessions" class="btn btn-secondary btn-sm">Back to Sessions</a>
+                <a href="/History?sessionId=@Model.SessionId" class="btn btn-secondary btn-sm">History</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="card" style="margin-top:1rem;">
+        <div class="card-header">
+            <h2>Log Entries (@Model.LogEntries.Count)</h2>
+        </div>
+        <div class="card-body" style="max-height:70vh;overflow-y:auto;font-family:'Cascadia Code','Fira Code',monospace;font-size:0.8rem;">
+            @if (Model.LogEntries.Count == 0)
+            {
+                <div class="empty-state" id="emptyState">
+                    <p>No log entries yet.</p>
+                </div>
+            }
+
+            <table class="data-table" id="logTable" style="@(Model.LogEntries.Count == 0 ? "display:none;" : "")">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Level</th>
+                        <th>Message</th>
+                    </tr>
+                </thead>
+                <tbody id="logBody">
+                    @foreach (var entry in Model.LogEntries)
+                    {
+                        <tr>
+                            <td style="white-space:nowrap;color:#64748b;">@entry.Timestamp.ToString("HH:mm:ss.fff")</td>
+                            <td>
+                                <span class="badge @(entry.Level == "Error" ? "badge-red" : entry.Level == "Warn" ? "badge-amber" : "badge-blue")">@entry.Level</span>
+                            </td>
+                            <td style="color:@(entry.Level == "Error" ? "#f87171" : entry.Level == "Warn" ? "#fbbf24" : "#e2e8f0");">@entry.Message</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@section Scripts {
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.7/signalr.min.js"></script>
+    <script>
+        (function () {
+            var sessionId = '@Model.SessionId';
+            if (!sessionId) return;
+
+            var connection = new signalR.HubConnectionBuilder()
+                .withUrl("/hubs/session")
+                .withAutomaticReconnect()
+                .build();
+
+            connection.on("LogAdded", function (entry) {
+                var emptyState = document.getElementById('emptyState');
+                if (emptyState) emptyState.style.display = 'none';
+                var table = document.getElementById('logTable');
+                if (table) table.style.display = '';
+
+                var tbody = document.getElementById('logBody');
+                var row = document.createElement('tr');
+                var time = new Date(entry.timestamp);
+                var ts = time.toTimeString().split(' ')[0] + '.' + String(time.getMilliseconds()).padStart(3, '0');
+                var level = entry.level || 'Info';
+                var badgeClass = level === 'Error' ? 'badge-red' : level === 'Warn' ? 'badge-amber' : 'badge-blue';
+                var textColor = level === 'Error' ? '#f87171' : level === 'Warn' ? '#fbbf24' : '#e2e8f0';
+                row.innerHTML =
+                    '<td style="white-space:nowrap;color:#64748b;">' + ts + '</td>' +
+                    '<td><span class="badge ' + badgeClass + '">' + level + '</span></td>' +
+                    '<td style="color:' + textColor + ';">' + (entry.message || '') + '</td>';
+                tbody.insertBefore(row, tbody.firstChild);
+            });
+
+            connection.start().then(function () {
+                connection.invoke("JoinSession", sessionId);
+            });
+        })();
+    </script>
+}

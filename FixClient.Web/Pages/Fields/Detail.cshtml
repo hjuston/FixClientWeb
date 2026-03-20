@@ -1,0 +1,70 @@
+@page
+@model FixClient.Web.Pages.FieldDetailModel
+@{
+    ViewData["Title"] = Model.FieldName + " (" + Model.Tag + ")";
+}
+
+<div class="breadcrumb">
+    <a href="/Dictionary">Dictionary</a>
+    <span class="separator">/</span>
+    <a href="/Fields?beginString=@Uri.EscapeDataString(Model.BeginString)">Fields</a>
+    <span class="separator">/</span>
+    <span>@Model.FieldName</span>
+</div>
+
+<div class="grid grid-2" style="margin-bottom:1rem;">
+    <div class="card">
+        <div class="card-header"><h2>Field Details</h2></div>
+        <div class="card-body">
+            <dl class="field-detail">
+                <dt>Tag</dt>
+                <dd><span class="badge badge-blue" style="font-size:1rem;">@Model.Tag</span></dd>
+                <dt>Name</dt>
+                <dd>@Model.FieldName</dd>
+                <dt>Data Type</dt>
+                <dd><span class="badge badge-gray">@Model.DataType</span></dd>
+                <dt>Description</dt>
+                <dd class="field-description">@(string.IsNullOrEmpty(Model.Description) ? "—" : Model.Description)</dd>
+                <dt>Pedigree</dt>
+                <dd>@(string.IsNullOrEmpty(Model.PedigreeText) ? "—" : Model.PedigreeText)</dd>
+            </dl>
+        </div>
+    </div>
+    @if (Model.Values.Count > 0)
+    {
+        <div class="card">
+            <div class="card-body stat-card">
+                <div class="stat-value">@Model.Values.Count</div>
+                <div class="stat-label">Enumerated Values</div>
+            </div>
+        </div>
+    }
+</div>
+
+@if (Model.Values.Count > 0)
+{
+    <div class="card">
+        <div class="card-header"><h2>Values</h2></div>
+        <div class="table-scroll">
+            <table class="data-table values-table">
+                <thead>
+                    <tr>
+                        <th style="width:80px;">Value</th>
+                        <th>Name</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var val in Model.Values)
+                    {
+                        <tr>
+                            <td><span class="badge badge-amber">@val.Value</span></td>
+                            <td>@val.Name</td>
+                            <td class="field-description">@val.Description</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}

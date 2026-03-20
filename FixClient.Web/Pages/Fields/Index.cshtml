@@ -1,0 +1,66 @@
+@page
+@model FixClient.Web.Pages.FieldsIndexModel
+@{
+    ViewData["Title"] = "Fields — " + Model.BeginString;
+}
+
+<div class="breadcrumb">
+    <a href="/Dictionary">Dictionary</a>
+    <span class="separator">/</span>
+    <span>Fields</span>
+</div>
+
+<div class="toolbar" style="margin-bottom:1rem;">
+    <div class="form-group" style="margin:0;">
+        <select class="form-control" style="width:200px;" onchange="location.href='/Fields?beginString='+encodeURIComponent(this.value)">
+            @foreach (var v in Model.AllVersions)
+            {
+                <option value="@v" selected="@(v == Model.BeginString)">@v</option>
+            }
+        </select>
+    </div>
+    <div class="search-box" style="flex:1;max-width:400px;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" id="fieldSearch" placeholder="Search by name, tag, or description..." class="form-control" style="padding-left:2rem;" oninput="filterFields()" />
+    </div>
+    <span style="color:#64748b;font-size:0.8rem;">@Model.Fields.Count fields</span>
+</div>
+
+<div class="card">
+    <div class="table-scroll">
+        <table class="data-table" id="fieldTable">
+            <thead>
+                <tr>
+                    <th style="width:80px;">Tag</th>
+                    <th>Name</th>
+                    <th>Data Type</th>
+                    <th>Values</th>
+                    <th>Description</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var field in Model.Fields)
+                {
+                    <tr class="field-row">
+                        <td><span class="badge badge-blue">@field.Tag</span></td>
+                        <td><a href="/Fields/Detail?beginString=@Uri.EscapeDataString(Model.BeginString)&tag=@field.Tag">@field.Name</a></td>
+                        <td><span class="badge badge-gray">@field.DataType</span></td>
+                        <td>@(field.ValueCount > 0 ? field.ValueCount.ToString() : "—")</td>
+                        <td class="field-description" style="max-width:350px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@field.Description</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+function filterFields() {
+    const q = document.getElementById('fieldSearch').value.toLowerCase();
+    document.querySelectorAll('.field-row').forEach(r => {
+        r.style.display = r.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+}
+</script>
+}

@@ -1,0 +1,99 @@
+@page
+@model FixClient.Web.Pages.DictionaryMessageModel
+@{
+    ViewData["Title"] = Model.MessageName;
+}
+
+<div class="breadcrumb">
+    <a href="/Dictionary">Dictionary</a>
+    <span class="separator">/</span>
+    <a href="/Dictionary/Version?beginString=@Uri.EscapeDataString(Model.BeginString)">@Model.BeginString</a>
+    <span class="separator">/</span>
+    <span>@Model.MessageName</span>
+</div>
+
+<div class="grid grid-2" style="margin-bottom:1rem;">
+    <div class="card">
+        <div class="card-header"><h2>Message Details</h2></div>
+        <div class="card-body">
+            <dl class="field-detail">
+                <dt>MsgType</dt>
+                <dd><span class="badge badge-blue">@Model.MsgType</span></dd>
+                <dt>Name</dt>
+                <dd>@Model.MessageName</dd>
+                <dt>Description</dt>
+                <dd class="field-description">@(string.IsNullOrEmpty(Model.Description) ? "—" : Model.Description)</dd>
+                <dt>Pedigree</dt>
+                <dd>@(string.IsNullOrEmpty(Model.PedigreeText) ? "—" : Model.PedigreeText)</dd>
+            </dl>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-body stat-card">
+            <div class="stat-value">@Model.Fields.Count</div>
+            <div class="stat-label">Fields</div>
+            <div style="margin-top:0.5rem;font-size:0.8rem;color:#94a3b8;">
+                @Model.Fields.Count(f => f.Required) required &middot; @Model.Fields.Count(f => !f.Required) optional
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="toolbar" style="margin-bottom:1rem;">
+    <div class="search-box" style="flex:1;max-width:400px;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" id="fieldSearch" placeholder="Search fields..." class="form-control" style="padding-left:2rem;" oninput="filterFields()" />
+    </div>
+</div>
+
+<div class="card">
+    <div class="table-scroll">
+        <table class="data-table" id="fieldTable">
+            <thead>
+                <tr>
+                    <th>Tag</th>
+                    <th>Name</th>
+                    <th>Required</th>
+                    <th>Description</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var field in Model.Fields)
+                {
+                    <tr class="field-row">
+                        <td><span class="badge badge-gray">@field.Tag</span></td>
+                        <td>
+                            @if (field.Depth > 0)
+                            {
+                                <span style="padding-left:@(field.Depth * 16)px;color:#64748b;">?</span>
+                            }
+                            <a href="/Fields/Detail?beginString=@Uri.EscapeDataString(Model.BeginString)&tag=@field.Tag">@field.Name</a>
+                        </td>
+                        <td>
+                            @if (field.Required)
+                            {
+                                <span class="badge badge-green">Yes</span>
+                            }
+                            else
+                            {
+                                <span class="badge badge-gray">No</span>
+                            }
+                        </td>
+                        <td class="field-description" style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@field.Description</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+function filterFields() {
+    const q = document.getElementById('fieldSearch').value.toLowerCase();
+    document.querySelectorAll('.field-row').forEach(r => {
+        r.style.display = r.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+}
+</script>
+}

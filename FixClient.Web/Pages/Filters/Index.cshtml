@@ -1,0 +1,79 @@
+@page
+@model FixClient.Web.Pages.FiltersIndexModel
+@{
+    ViewData["Title"] = "Message Filters";
+}
+
+<div class="card">
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+        <h2>Message Filters</h2>
+        <div>
+            @if (Model.Found)
+            {
+                <span class="badge badge-blue">Session: @Model.SessionLabel</span>
+            }
+            <a href="/Sessions" class="btn btn-secondary btn-sm" style="margin-left:0.5rem;">Back</a>
+        </div>
+    </div>
+    <div class="card-body">
+        <p style="color:#94a3b8;font-size:0.85rem;margin-bottom:1rem;">
+            Select which message types to show in the History view. Unchecked messages will be hidden.
+        </p>
+
+        <form method="post">
+            <input type="hidden" name="sessionId" value="@Model.SessionId" />
+            <input type="hidden" name="version" value="@Model.SelectedVersion" />
+
+            <div class="toolbar" style="margin-bottom:1rem;">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="toggleAll(true)">Select All</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="toggleAll(false)">Deselect All</button>
+                <button type="submit" class="btn btn-primary btn-sm">Save Filters</button>
+            </div>
+
+            <div class="form-group">
+                <input type="text" class="form-control" id="filterSearch" placeholder="Search messages..." oninput="filterMessages()" />
+            </div>
+
+            <div style="max-height:60vh;overflow-y:auto;">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th style="width:3rem;">Show</th>
+                            <th>MsgType</th>
+                            <th>Name</th>
+                        </tr>
+                    </thead>
+                    <tbody id="filterBody">
+                        @foreach (var f in Model.MessageFilters)
+                        {
+                            <tr class="filter-row" data-name="@f.Name.ToLowerInvariant()">
+                                <td>
+                                    <input type="checkbox" name="enabledMsgTypes" value="@f.MsgType"
+                                           @(f.Enabled ? "checked" : "") class="filter-checkbox" />
+                                </td>
+                                <td><code>@f.MsgType</code></td>
+                                <td>@f.Name</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </form>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        function toggleAll(checked) {
+            document.querySelectorAll('.filter-checkbox').forEach(function (cb) { cb.checked = checked; });
+        }
+
+        function filterMessages() {
+            var search = document.getElementById('filterSearch').value.toLowerCase();
+            document.querySelectorAll('.filter-row').forEach(function (row) {
+                var name = row.getAttribute('data-name') || '';
+                row.style.display = name.includes(search) ? '' : 'none';
+            });
+        }
+    </script>
+}

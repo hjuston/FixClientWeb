@@ -1,0 +1,67 @@
+@page
+@model FixClient.Web.Pages.IndexModel
+@{
+    ViewData["Title"] = "Dashboard";
+}
+
+<div class="grid grid-4">
+    @foreach (var version in Model.Versions)
+    {
+        <div class="card">
+            <div class="card-body stat-card">
+                <div class="stat-value">@version.MessageCount</div>
+                <div class="stat-label">@version.BeginString Messages</div>
+                <a href="/Dictionary/Version?beginString=@Uri.EscapeDataString(version.BeginString)" style="font-size:0.8rem;">Browse &rarr;</a>
+            </div>
+        </div>
+    }
+    <div class="card">
+        <div class="card-body stat-card">
+            <div class="stat-value">@Model.TotalFields</div>
+            <div class="stat-label">Total Fields (latest)</div>
+            <a href="/Fields" style="font-size:0.8rem;">Browse &rarr;</a>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-body stat-card">
+            <div class="stat-value">@Model.ActiveSessions</div>
+            <div class="stat-label">Sessions (@Model.ConnectedSessions connected)</div>
+            <a href="/Sessions" style="font-size:0.8rem;">Manage &rarr;</a>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-body stat-card">
+            <div class="stat-value">@Model.TotalMessages</div>
+            <div class="stat-label">Total FIX Messages</div>
+            <a href="/History" style="font-size:0.8rem;">View History &rarr;</a>
+        </div>
+    </div>
+</div>
+
+<div class="grid grid-2" style="margin-top:1rem;">
+    <div class="card">
+        <div class="card-header"><h2>Quick Tools</h2></div>
+        <div class="card-body">
+            <p style="margin-bottom:0.75rem;color:#94a3b8;">Parse FIX messages, browse the data dictionary, or compose new messages.</p>
+            <div class="toolbar">
+                <a href="/Parser" class="btn btn-primary">Open Parser</a>
+                <a href="/Messages" class="btn btn-secondary">Message Builder</a>
+            </div>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-header"><h2>REST API</h2></div>
+        <div class="card-body">
+            <p style="margin-bottom:0.75rem;color:#94a3b8;">Programmatic access to FIX dictionary data.</p>
+            <ul style="list-style:none;font-size:0.85rem;">
+                <li style="margin-bottom:0.3rem;"><code>GET</code> <a href="/api/versions">/api/versions</a></li>
+                <li style="margin-bottom:0.3rem;"><code>GET</code> <a href="/api/versions/FIX.5.0SP2/messages">/api/versions/{id}/messages</a></li>
+                <li style="margin-bottom:0.3rem;"><code>GET</code> <a href="/api/versions/FIX.5.0SP2/fields">/api/versions/{id}/fields</a></li>
+                <li style="margin-bottom:0.3rem;"><code>POST</code> /api/parser/parse</li>
+                <li style="margin-bottom:0.3rem;"><code>GET</code> <a href="/api/sessions">/api/sessions</a></li>
+                <li style="margin-bottom:0.3rem;"><code>GET</code> /api/sessions/{id}/history</li>
+                <li><code>GET</code> /api/sessions/{id}/log</li>
+            </ul>
+        </div>
+    </div>
+</div>
