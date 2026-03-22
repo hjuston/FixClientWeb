@@ -129,15 +129,17 @@ app.MapPost("/api/parser/parse", async (HttpRequest request) =>
 app.MapPost("/api/sessions", (HttpRequest request) =>
 {
     var form = request.Form;
-    var info = sessionManager.CreateSession(
-        form["senderCompId"].ToString(),
-        form["targetCompId"].ToString(),
-        form["host"].ToString(),
-        int.TryParse(form["port"], out var p) ? p : 9810,
-        form["beginString"].ToString(),
-        int.TryParse(form["heartBtInt"], out var h) ? h : 30,
-        form["behaviour"].ToString() == "Acceptor" ? Fix.Behaviour.Acceptor : Fix.Behaviour.Initiator
-    );
+    var sessionInfo = new FixSessionInfo
+    {
+        SenderCompId = form["senderCompId"].ToString(),
+        TargetCompId = form["targetCompId"].ToString(),
+        Host = form["host"].ToString(),
+        Port = int.TryParse(form["port"], out var p) ? p : 9810,
+        BeginString = form["beginString"].ToString(),
+        HeartBtInt = int.TryParse(form["heartBtInt"], out var h) ? h : 30,
+        Behaviour = form["behaviour"].ToString() == "Acceptor" ? Fix.Behaviour.Acceptor : Fix.Behaviour.Initiator
+    };
+    var info = sessionManager.CreateSession(sessionInfo);
     return Results.Ok(new { info.Id });
 });
 
@@ -176,6 +178,85 @@ app.MapGet("/api/sessions/{id}/log", (string id) =>
 app.MapDelete("/api/sessions/{id}", (string id) =>
 {
     return sessionManager.RemoveSession(id) ? Results.Ok() : Results.NotFound();
+});
+
+// --- API: Orders for a session ---
+app.MapGet("/api/sessions/{id}/orders", (string id) =>
+{
+    var info = sessionManager.GetSession(id);
+    if (info == null) return Results.NotFound();
+
+    var orders = info.OrderBook.Orders.Select(o => new
+    {
+        o.ClOrdID,
+        o.Symbol,
+        Side = o.Side?.ToString() ?? "",
+        o.OrderQty,
+        Price = o.Price?.ToString("F4") ?? "",
+        OrdStatus = o.OrdStatus?.ToString() ?? "Pending",
+        OrdStatusValue = o.OrdStatus?.Value ?? "",
+        o.OrderID,
+        CumQty = o.CumQty ?? 0,
+        AvgPx = o.AvgPx ?? 0m,
+        LeavesQty = o.LeavesQty ?? o.OrderQty,
+        o.Active,
+        o.SenderCompID,
+        o.TargetCompID,
+        MessageCount = o.Messages.Count
+    });
+    return Results.Ok(orders);
+});
+
+// --- API: Acknowledge order ---
+app.MapPost("/api/sessions/{id}/orders/{clOrdId}/acknowledge", (string id, string clOrdId) =>
+{
+    return sessionManager.AcknowledgeOrder(id, clOrdId)
+        ? Results.Ok(new { status = "acknowledged" })
+        : Results.BadRequest(new { error = "Failed to acknowledge order" });
+});
+
+// --- API: Reject order ---
+app.MapPost("/api/sessions/{id}/orders/{clOrdId}/reject", async (string id, string clOrdId, HttpRequest request) =>
+{
+    string? reason = null;
+    if (request.ContentLength > 0)
+    {
+        using var reader = new StreamReader(request.Body, Encoding.UTF8);
+        reason = await reader.ReadToEndAsync();
+    }
+    return sessionManager.RejectOrder(id, clOrdId, reason)
+        ? Results.Ok(new { status = "rejected" })
+        : Results.BadRequest(new { error = "Failed to reject order" });
+});
+
+// --- API: Fill order ---
+app.MapPost("/api/sessions/{id}/orders/{clOrdId}/fill", (string id, string clOrdId, long? qty, decimal? price) =>
+{
+    return sessionManager.FillOrder(id, clOrdId, qty, price)
+        ? Results.Ok(new { status = "filled" })
+        : Results.BadRequest(new { error = "Failed to fill order" });
+});
+
+// --- API: Cancel order ---
+app.MapPost("/api/sessions/{id}/orders/{clOrdId}/cancel", (string id, string clOrdId) =>
+{
+    return sessionManager.CancelOrder(id, clOrdId)
+        ? Results.Ok(new { status = "cancelled" })
+        : Results.BadRequest(new { error = "Failed to cancel order" });
+});
+
+// --- API: Reject cancel request ---
+app.MapPost("/api/sessions/{id}/orders/{clOrdId}/reject-cancel", async (string id, string clOrdId, HttpRequest request) =>
+{
+    string? reason = null;
+    if (request.ContentLength > 0)
+    {
+        using var reader = new StreamReader(request.Body, Encoding.UTF8);
+        reason = await reader.ReadToEndAsync();
+    }
+    return sessionManager.RejectCancelRequest(id, clOrdId, reason)
+        ? Results.Ok(new { status = "cancel-rejected" })
+        : Results.BadRequest(new { error = "Failed to reject cancel request" });
 });
 
 app.Run();

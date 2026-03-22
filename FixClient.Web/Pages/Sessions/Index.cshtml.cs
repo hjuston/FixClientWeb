@@ -23,10 +23,36 @@ public class SessionsIndexModel : PageModel
     }
 
     public IActionResult OnPost(string senderCompId, string targetCompId, string host, int port,
-        string beginString, int heartBtInt, string behaviour)
+        string beginString, int heartBtInt, string behaviour,
+        string? orderBehaviour, string? logonBehaviour, string? defaultApplVerId,
+        int testRequestDelay = 2, bool brokenNewSeqNo = false, bool nextExpectedMsgSeqNum = false,
+        bool validateDataFields = true, int incomingSeqNum = 1, int outgoingSeqNum = 1,
+        int testRequestId = 0, bool fragmentMessages = true)
     {
-        _manager.CreateSession(senderCompId, targetCompId, host, port, beginString, heartBtInt,
-            behaviour == "Acceptor" ? Fix.Behaviour.Acceptor : Fix.Behaviour.Initiator);
+        var info = new FixSessionInfo
+        {
+            SenderCompId = senderCompId,
+            TargetCompId = targetCompId,
+            Host = host,
+            Port = port,
+            BeginString = beginString,
+            HeartBtInt = heartBtInt,
+            Behaviour = behaviour == "Acceptor" ? Fix.Behaviour.Acceptor : Fix.Behaviour.Initiator,
+            OrderBehaviour = orderBehaviour == "Acceptor" ? Fix.Behaviour.Acceptor : Fix.Behaviour.Initiator,
+            LogonBehaviour = logonBehaviour == "Acceptor" ? Fix.Behaviour.Acceptor
+                : logonBehaviour == "Initiator" ? Fix.Behaviour.Initiator
+                : (behaviour == "Acceptor" ? Fix.Behaviour.Acceptor : Fix.Behaviour.Initiator),
+            DefaultApplVerId = defaultApplVerId,
+            TestRequestDelay = testRequestDelay,
+            BrokenNewSeqNo = brokenNewSeqNo,
+            NextExpectedMsgSeqNum = nextExpectedMsgSeqNum,
+            ValidateDataFields = validateDataFields,
+            IncomingSeqNum = incomingSeqNum,
+            OutgoingSeqNum = outgoingSeqNum,
+            TestRequestId = testRequestId,
+            FragmentMessages = fragmentMessages
+        };
+        _manager.CreateSession(info);
         return RedirectToPage();
     }
 

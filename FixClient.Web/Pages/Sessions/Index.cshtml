@@ -9,6 +9,7 @@
         <div class="card-header"><h2>Create Session</h2></div>
         <div class="card-body">
             <form method="post">
+                <h3 style="margin:0 0 0.75rem;font-size:0.95rem;color:#e2e8f0;border-bottom:1px solid #334155;padding-bottom:0.5rem;">Required</h3>
                 <div class="form-group">
                     <label>Behaviour</label>
                     <select name="Behaviour" class="form-control">
@@ -51,7 +52,91 @@
                         <input type="number" name="HeartBtInt" class="form-control" value="30" />
                     </div>
                 </div>
-                <div class="toolbar">
+
+                <details style="margin-top:1rem;">
+                    <summary style="cursor:pointer;font-size:0.95rem;color:#e2e8f0;border-bottom:1px solid #334155;padding-bottom:0.5rem;margin-bottom:0.75rem;">Optional</summary>
+
+                    <h4 style="margin:0.75rem 0 0.5rem;font-size:0.85rem;color:#94a3b8;">Session</h4>
+                    <div class="grid grid-2">
+                        <div class="form-group">
+                            <label>Order Flow</label>
+                            <select name="OrderBehaviour" class="form-control">
+                                <option>Initiator</option>
+                                <option>Acceptor</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Logon Behaviour</label>
+                            <select name="LogonBehaviour" class="form-control">
+                                <option value="">(same as Behaviour)</option>
+                                <option>Initiator</option>
+                                <option>Acceptor</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="grid grid-2">
+                        <div class="form-group">
+                            <label>Default Application Version</label>
+                            <select name="DefaultApplVerId" class="form-control">
+                                <option value="">(same as FIX Version)</option>
+                                @foreach (var v in Model.Versions)
+                                {
+                                    <option value="@v">@v</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>TestRequest Delay</label>
+                            <input type="number" name="TestRequestDelay" class="form-control" value="2" />
+                        </div>
+                    </div>
+                    <div class="grid grid-3">
+                        <div class="form-group">
+                            <label style="display:flex;align-items:center;gap:0.5rem;">
+                                <input type="checkbox" name="BrokenNewSeqNo" value="true" />
+                                Broken NewSeqNo
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label style="display:flex;align-items:center;gap:0.5rem;">
+                                <input type="checkbox" name="NextExpectedMsgSeqNum" value="true" />
+                                NextExpectedMsgSeqNum
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label style="display:flex;align-items:center;gap:0.5rem;">
+                                <input type="checkbox" name="ValidateDataFields" value="true" checked />
+                                Validate Data Fields
+                            </label>
+                        </div>
+                    </div>
+
+                    <h4 style="margin:0.75rem 0 0.5rem;font-size:0.85rem;color:#94a3b8;">Message Generation</h4>
+                    <div class="grid grid-3">
+                        <div class="form-group">
+                            <label>Incoming MsgSeqNum</label>
+                            <input type="number" name="IncomingSeqNum" class="form-control" value="1" min="1" />
+                        </div>
+                        <div class="form-group">
+                            <label>Outgoing MsgSeqNum</label>
+                            <input type="number" name="OutgoingSeqNum" class="form-control" value="1" min="1" />
+                        </div>
+                        <div class="form-group">
+                            <label>Test Request ID</label>
+                            <input type="number" name="TestRequestId" class="form-control" value="0" min="0" />
+                        </div>
+                    </div>
+
+                    <h4 style="margin:0.75rem 0 0.5rem;font-size:0.85rem;color:#94a3b8;">Network</h4>
+                    <div class="form-group">
+                        <label style="display:flex;align-items:center;gap:0.5rem;">
+                            <input type="checkbox" name="FragmentMessages" value="true" checked />
+                            Fragment Messages
+                        </label>
+                    </div>
+                </details>
+
+                <div class="toolbar" style="margin-top:1rem;">
                     <button type="submit" class="btn btn-primary">Create Session</button>
                 </div>
             </form>

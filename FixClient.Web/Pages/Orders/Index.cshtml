@@ -1,45 +1,77 @@
-@page
+@page "{sessionId?}"
 @model FixClient.Web.Pages.OrdersIndexModel
 @{
     ViewData["Title"] = "Orders";
 }
 
-<div class="card">
-    <div class="card-header">
-        <h2>Order Book</h2>
-        <div class="toolbar">
-            <span style="font-size:0.8rem;color:#64748b;">Parse FIX messages to populate the order book</span>
+@if (Model.SessionId == null)
+{
+    <div class="card">
+        <div class="card-header">
+            <h2>Order Book</h2>
+            <div class="toolbar">
+                <span style="font-size:0.8rem;color:#64748b;">Select a session or parse FIX messages</span>
+            </div>
+        </div>
+        <div class="card-body">
+            @if (Model.AvailableSessions.Count > 0)
+            {
+                <div class="form-group" style="margin-bottom:1rem;">
+                    <label>Active Sessions</label>
+                    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.5rem;">
+                        @foreach (var s in Model.AvailableSessions)
+                        {
+                            <a href="/Orders/@s.Id" class="btn btn-primary" style="font-size:0.85rem;">
+                                @s.Id — @s.SenderCompId / @s.TargetCompId (@s.Behaviour) — @s.OrderCount orders
+                            </a>
+                        }
+                    </div>
+                </div>
+            }
+            <form method="post">
+                <div class="form-group">
+                    <label>Or paste FIX log messages containing order flow</label>
+                    <textarea class="form-control" name="RawInput" rows="6" placeholder="Paste FIX messages here...">@Model.RawInput</textarea>
+                </div>
+                <div class="toolbar">
+                    <button type="submit" class="btn btn-primary">Process Orders</button>
+                </div>
+            </form>
         </div>
     </div>
-    <div class="card-body">
-        <form method="post">
-            <div class="form-group">
-                <label>Paste FIX log messages containing order flow (NewOrderSingle, ExecutionReport, etc.)</label>
-                <textarea class="form-control" name="RawInput" rows="6" placeholder="Paste FIX messages here...">@Model.RawInput</textarea>
-            </div>
+}
+else
+{
+    <div class="card">
+        <div class="card-header">
+            <h2>Session @Model.SessionId — Order Book</h2>
             <div class="toolbar">
-                <button type="submit" class="btn btn-primary">Process Orders</button>
+                <a href="/Orders" class="btn" style="font-size:0.8rem;">Back to Sessions</a>
+                <button class="btn btn-primary" onclick="refreshOrders()" style="font-size:0.8rem;">Refresh</button>
             </div>
-        </form>
+        </div>
     </div>
-</div>
+}
 
 @if (Model.Orders.Count > 0)
 {
     <div class="card" style="margin-top:1rem;">
         <div class="card-header">
-            <h2>Order Book (@Model.Orders.Count orders)</h2>
+            <h2>Orders (@Model.Orders.Count)</h2>
             <div class="toolbar">
                 <span class="badge badge-green">@Model.Orders.Count(o => o.Active) active</span>
                 <span class="badge badge-gray">@Model.Orders.Count(o => !o.Active) inactive</span>
+                @if (Model.SessionId != null)
+                {
+                    <button class="btn btn-primary" style="font-size:0.8rem;" onclick="ackAll()">Ack All Pending</button>
+                    <button class="btn" style="font-size:0.8rem;background:#dc2626;color:white;" onclick="rejectAll()">Reject All Pending</button>
+                }
             </div>
         </div>
         <div class="table-scroll">
             <table class="data-table">
                 <thead>
                     <tr>
-                        <th>Sender</th>
-                        <th>Target</th>
                         <th>ClOrdID</th>
                         <th>Symbol</th>
                         <th>Side</th>
@@ -48,30 +80,111 @@
                         <th>OrdStatus</th>
                         <th style="text-align:right;">CumQty</th>
                         <th style="text-align:right;">AvgPx</th>
-                        <th>SendingTime</th>
+                        <th style="text-align:right;">LeavesQty</th>
                         <th>Messages</th>
+                        @if (Model.SessionId != null)
+                        {
+                            <th>Actions</th>
+                        }
                     </tr>
                 </thead>
                 <tbody>
                     @foreach (var order in Model.Orders)
                     {
-                        <tr>
-                            <td>@order.SenderCompID</td>
-                            <td>@order.TargetCompID</td>
+                        <tr id="order-@order.ClOrdID">
                             <td><span class="badge badge-blue">@order.ClOrdID</span></td>
                             <td>@order.Symbol</td>
                             <td>@order.Side</td>
                             <td style="text-align:right;">@order.OrderQty</td>
                             <td style="text-align:right;">@order.Price</td>
-                            <td><span class="badge @order.StatusBadge">@order.OrdStatus</span></td>
+                            <td><span class="badge @order.StatusBadge" id="status-@order.ClOrdID">@order.OrdStatus</span></td>
                             <td style="text-align:right;">@order.CumQty</td>
                             <td style="text-align:right;">@order.AvgPx</td>
-                            <td style="font-size:0.75rem;">@order.SendingTime</td>
+                            <td style="text-align:right;">@order.LeavesQty</td>
                             <td>@order.MessageCount</td>
+                            @if (Model.SessionId != null)
+                            {
+                                <td style="white-space:nowrap;">
+                                    @if (order.IsPending)
+                                    {
+                                        <button class="btn btn-primary" style="font-size:0.75rem;padding:2px 8px;" onclick="orderAction('@Model.SessionId','@order.ClOrdID','acknowledge')">Ack</button>
+                                        <button class="btn" style="font-size:0.75rem;padding:2px 8px;background:#dc2626;color:white;" onclick="orderAction('@Model.SessionId','@order.ClOrdID','reject')">Reject</button>
+                                    }
+                                    @if (order.IsActive)
+                                    {
+                                        <button class="btn" style="font-size:0.75rem;padding:2px 8px;background:#16a34a;color:white;" onclick="orderAction('@Model.SessionId','@order.ClOrdID','fill')">Fill</button>
+                                        <button class="btn" style="font-size:0.75rem;padding:2px 8px;background:#ea580c;color:white;" onclick="orderAction('@Model.SessionId','@order.ClOrdID','cancel')">Cancel</button>
+                                    }
+                                    @if (order.IsPendingCancel)
+                                    {
+                                        <button class="btn" style="font-size:0.75rem;padding:2px 8px;background:#ea580c;color:white;" onclick="orderAction('@Model.SessionId','@order.ClOrdID','cancel')">Ack Cancel</button>
+                                        <button class="btn" style="font-size:0.75rem;padding:2px 8px;background:#dc2626;color:white;" onclick="orderAction('@Model.SessionId','@order.ClOrdID','reject-cancel')">Reject Cancel</button>
+                                    }
+                                </td>
+                            }
                         </tr>
                     }
                 </tbody>
             </table>
         </div>
     </div>
+}
+else if (Model.SessionId != null)
+{
+    <div class="card" style="margin-top:1rem;">
+        <div class="card-body">
+            <p style="color:#64748b;">No orders received yet. Waiting for incoming NewOrderSingle messages...</p>
+        </div>
+    </div>
+}
+
+@if (Model.SessionId != null)
+{
+    <script>
+        async function orderAction(sessionId, clOrdId, action) {
+            try {
+                const resp = await fetch(`/api/sessions/${sessionId}/orders/${encodeURIComponent(clOrdId)}/${action}`, { method: 'POST' });
+                if (resp.ok) {
+                    location.reload();
+                } else {
+                    const err = await resp.json();
+                    alert(err.error || 'Action failed');
+                }
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        async function ackAll() {
+            const pendings = document.querySelectorAll('[id^="order-"]');
+            for (const row of pendings) {
+                const ackBtn = row.querySelector('button');
+                if (ackBtn && ackBtn.textContent.trim() === 'Ack') {
+                    ackBtn.click();
+                    await new Promise(r => setTimeout(r, 100));
+                }
+            }
+        }
+
+        async function rejectAll() {
+            const pendings = document.querySelectorAll('[id^="order-"]');
+            for (const row of pendings) {
+                const btns = row.querySelectorAll('button');
+                for (const btn of btns) {
+                    if (btn.textContent.trim() === 'Reject') {
+                        btn.click();
+                        await new Promise(r => setTimeout(r, 100));
+                        break;
+                    }
+                }
+            }
+        }
+
+        function refreshOrders() {
+            location.reload();
+        }
+
+        // Auto-refresh every 3 seconds
+        setTimeout(() => location.reload(), 3000);
+    </script>
 }

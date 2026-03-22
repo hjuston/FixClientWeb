@@ -41,4 +41,34 @@ public class SessionHub : Hub
         _manager.SendMessage(sessionId, msg);
         return Task.CompletedTask;
     }
+
+    public Task AcknowledgeOrder(string sessionId, string clOrdId)
+    {
+        _manager.AcknowledgeOrder(sessionId, clOrdId);
+        return Task.CompletedTask;
+    }
+
+    public Task RejectOrder(string sessionId, string clOrdId, string? reason)
+    {
+        _manager.RejectOrder(sessionId, clOrdId, reason);
+        return Task.CompletedTask;
+    }
+
+    public Task FillOrder(string sessionId, string clOrdId, long? qty, decimal? price)
+    {
+        _manager.FillOrder(sessionId, clOrdId, qty, price);
+        return Task.CompletedTask;
+    }
+
+    public Task CancelOrder(string sessionId, string clOrdId)
+    {
+        _manager.CancelOrder(sessionId, clOrdId);
+        return Task.CompletedTask;
+    }
+
+    public Task RejectCancelRequest(string sessionId, string clOrdId, string? reason)
+    {
+        _manager.RejectCancelRequest(sessionId, clOrdId, reason);
+        return Task.CompletedTask;
+    }
 }
