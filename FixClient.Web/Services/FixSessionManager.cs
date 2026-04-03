@@ -1,7 +1,10 @@
 using System.Collections.Concurrent;
+using System.Globalization;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using Fix;
+using FixClient.Web.Data;
 
 namespace FixClient.Web.Services;
 
@@ -9,8 +12,8 @@ public class FixSessionInfo
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N")[..8];
     // Required
-    public string SenderCompId { get; set; } = "SENDER";
-    public string TargetCompId { get; set; } = "TARGET";
+    public string SenderCompId { get; set; } = "";
+    public string TargetCompId { get; set; } = "";
     public string Host { get; set; } = "127.0.0.1";
     public int Port { get; set; } = 9810;
     public string BeginString { get; set; } = "FIX.5.0SP2";
@@ -34,6 +37,8 @@ public class FixSessionInfo
     public Fix.Session? Session { get; set; }
     public TcpClient? TcpClient { get; set; }
     public TcpListener? TcpListener { get; set; }
+    public CancellationTokenSource? ListenerCancellation { get; set; }
+    public bool Enabled { get; set; }
     public List<LogEntry> LogEntries { get; } = [];
     public List<HistoryEntry> HistoryEntries { get; } = [];
     public OrderBook OrderBook { get; } = new();
@@ -49,6 +54,13 @@ public record HistoryEntry(DateTime Timestamp, string Direction, string MsgType,
 public class FixSessionManager
 {
     readonly ConcurrentDictionary<string, FixSessionInfo> _sessions = new();
+    readonly SessionPersistenceStore? _store;
+
+    public FixSessionManager(SessionPersistenceStore? store = null)
+    {
+        _store = store;
+        LoadPersistedSessions();
+    }
 
     public event Action<string, HistoryEntry>? MessageReceived;
     public event Action<string, HistoryEntry>? MessageSent;
@@ -58,6 +70,11 @@ public class FixSessionManager
     public IReadOnlyDictionary<string, FixSessionInfo> Sessions => _sessions;
 
     public FixSessionInfo CreateSession(FixSessionInfo info)
+    {
+        return CreateSession(info, addCreatedLog: true, persist: true);
+    }
+
+    FixSessionInfo CreateSession(FixSessionInfo info, bool addCreatedLog, bool persist)
     {
         var session = new Fix.Session
         {
@@ -97,6 +114,7 @@ public class FixSessionManager
             info.HistoryEntries.Add(entry);
             info.OrderBook.Process((Fix.Message)msg.Clone());
             MessageReceived?.Invoke(info.Id, entry);
+            PersistSafe(() => _store!.AddHistoryAsync(info.Id, entry));
         };
 
         session.MessageSent += (sender, e) =>
@@ -109,6 +127,7 @@ public class FixSessionManager
                 FormatSummary(msg), FormatRaw(msg));
             info.HistoryEntries.Add(entry);
             MessageSent?.Invoke(info.Id, entry);
+            PersistSafe(() => _store!.AddHistoryAsync(info.Id, entry));
         };
 
         session.Information += (sender, e) =>
@@ -116,6 +135,7 @@ public class FixSessionManager
             var entry = new LogEntry(e.TimeStamp, "Info", e.Message);
             info.LogEntries.Add(entry);
             LogAdded?.Invoke(info.Id, entry);
+            PersistSafe(() => _store!.AddLogAsync(info.Id, entry));
         };
 
         session.Warning += (sender, e) =>
@@ -123,6 +143,7 @@ public class FixSessionManager
             var entry = new LogEntry(e.TimeStamp, "Warn", e.Message);
             info.LogEntries.Add(entry);
             LogAdded?.Invoke(info.Id, entry);
+            PersistSafe(() => _store!.AddLogAsync(info.Id, entry));
         };
 
         session.Error += (sender, e) =>
@@ -130,21 +151,40 @@ public class FixSessionManager
             var entry = new LogEntry(e.TimeStamp, "Error", e.Message);
             info.LogEntries.Add(entry);
             LogAdded?.Invoke(info.Id, entry);
+            PersistSafe(() => _store!.AddLogAsync(info.Id, entry));
         };
 
         session.StateChanged += (sender, e) =>
         {
             info.SessionState = e.State;
+            info.Enabled = e.State != State.Disconnected;
+
+            if (e.State == State.Disconnected)
+            {
+                ReleaseNetworkResources(info);
+            }
+
             StateChanged?.Invoke(info.Id, e.State);
             var entry = new LogEntry(DateTime.Now, "Info", $"State changed to {e.State}");
             info.LogEntries.Add(entry);
             LogAdded?.Invoke(info.Id, entry);
+            PersistSafe(() => _store!.AddLogAsync(info.Id, entry));
+            PersistSafe(() => _store!.UpsertSessionAsync(info));
         };
 
         info.Session = session;
         _sessions[info.Id] = info;
 
-        AddLog(info, "Info", "Session created");
+        if (addCreatedLog)
+        {
+            AddLog(info, "Info", "Session created");
+        }
+
+        if (persist)
+        {
+            PersistSafe(() => _store!.UpsertSessionAsync(info));
+        }
+
         return info;
     }
 
@@ -157,29 +197,89 @@ public class FixSessionManager
         {
             if (info.Behaviour == Behaviour.Initiator)
             {
+                if (info.Enabled && info.SessionState != State.Disconnected)
+                    return true;
+
                 var address = Fix.Network.GetAddress(info.Host);
                 info.TcpClient = new TcpClient();
                 AddLog(info, "Info", $"Connecting to {info.Host}:{info.Port}...");
                 await info.TcpClient.ConnectAsync(address, info.Port);
                 info.Session.Stream = info.TcpClient.GetStream();
-            }
-            else
-            {
-                var endPoint = new IPEndPoint(IPAddress.Any, info.Port);
-                info.TcpListener = new TcpListener(endPoint);
-                info.TcpListener.Start();
-                AddLog(info, "Info", $"Listening on port {info.Port}...");
-                var socket = await info.TcpListener.AcceptSocketAsync();
-                info.Session.Stream = new System.Net.Sockets.NetworkStream(socket, true);
+                info.Enabled = true;
+                info.SessionState = State.Connected;
+                StateChanged?.Invoke(info.Id, State.Connected);
+                AddLog(info, "Info", "Enabled");
+                PersistSafe(() => _store!.UpsertSessionAsync(info));
+                info.Session.Open();
+                return true;
             }
 
-            info.Session.Open();
+            if (info.Enabled && info.TcpListener != null)
+                return true;
+
+            var endPoint = new IPEndPoint(IPAddress.Any, info.Port);
+            info.TcpListener = new TcpListener(endPoint);
+            info.TcpListener.Server.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+            info.TcpListener.Start();
+            info.Enabled = true;
+            info.ListenerCancellation = new CancellationTokenSource();
+
+            info.SessionState = State.Connected;
+            StateChanged?.Invoke(info.Id, State.Connected);
+            AddLog(info, "Info", $"Enabled. Listening on port {info.Port}...");
+            PersistSafe(() => _store!.UpsertSessionAsync(info));
+
+            _ = Task.Run(() => AcceptConnectionAsync(info, info.ListenerCancellation.Token));
             return true;
         }
         catch (Exception ex)
         {
+            info.Enabled = false;
+            ReleaseNetworkResources(info);
+            info.SessionState = State.Disconnected;
+            StateChanged?.Invoke(info.Id, State.Disconnected);
             AddLog(info, "Error", $"Connection failed: {ex.Message}");
+            PersistSafe(() => _store!.UpsertSessionAsync(info));
             return false;
+        }
+    }
+
+    async Task AcceptConnectionAsync(FixSessionInfo info, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (info.TcpListener == null || info.Session == null)
+                return;
+
+            var socket = await info.TcpListener.AcceptSocketAsync(cancellationToken);
+            if (cancellationToken.IsCancellationRequested)
+            {
+                socket.Dispose();
+                return;
+            }
+
+            AddLog(info, "Info", "Incoming connection accepted");
+            info.Session.Stream = new System.Net.Sockets.NetworkStream(socket, true);
+            info.Session.Open();
+
+            info.SessionState = State.Connected;
+            StateChanged?.Invoke(info.Id, State.Connected);
+            PersistSafe(() => _store!.UpsertSessionAsync(info));
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        catch (Exception ex)
+        {
+            info.Enabled = false;
+            ReleaseNetworkResources(info);
+            AddLog(info, "Error", $"Accept failed: {ex.Message}");
+            info.SessionState = State.Disconnected;
+            StateChanged?.Invoke(info.Id, State.Disconnected);
+            PersistSafe(() => _store!.UpsertSessionAsync(info));
         }
     }
 
@@ -190,14 +290,13 @@ public class FixSessionManager
 
         try
         {
+            info.Enabled = false;
             info.Session?.Close();
-            info.TcpClient?.Close();
-            info.TcpClient = null;
-            info.TcpListener?.Stop();
-            info.TcpListener = null;
+            ReleaseNetworkResources(info);
             info.SessionState = State.Disconnected;
             AddLog(info, "Info", "Disconnected");
             StateChanged?.Invoke(info.Id, State.Disconnected);
+            PersistSafe(() => _store!.UpsertSessionAsync(info));
         }
         catch (Exception ex)
         {
@@ -209,6 +308,12 @@ public class FixSessionManager
     {
         if (!_sessions.TryGetValue(sessionId, out var info) || info.Session == null)
             return false;
+
+        if (info.SessionState == State.Disconnected || info.Session.Stream == null)
+        {
+            AddLog(info, "Error", "Send failed: session is not connected");
+            return false;
+        }
 
         try
         {
@@ -224,10 +329,15 @@ public class FixSessionManager
 
     public bool RemoveSession(string sessionId)
     {
-        if (_sessions.TryRemove(sessionId, out var info))
+        if (_sessions.TryGetValue(sessionId, out _))
         {
             Disconnect(sessionId);
-            return true;
+            var removed = _sessions.TryRemove(sessionId, out _);
+            if (removed)
+            {
+                PersistSafe(() => _store!.DeleteSessionAsync(sessionId));
+            }
+            return removed;
         }
         return false;
     }
@@ -243,6 +353,117 @@ public class FixSessionManager
         var entry = new LogEntry(DateTime.Now, level, message);
         info.LogEntries.Add(entry);
         LogAdded?.Invoke(info.Id, entry);
+        PersistSafe(() => _store!.AddLogAsync(info.Id, entry));
+    }
+
+    void PersistSafe(Func<Task> operation)
+    {
+        if (_store == null)
+            return;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await operation();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Persistence error: {ex.Message}");
+            }
+        });
+    }
+
+    void LoadPersistedSessions()
+    {
+        if (_store == null)
+            return;
+
+        try
+        {
+            var persisted = _store.LoadAllAsync().GetAwaiter().GetResult();
+
+            foreach (var row in persisted)
+            {
+                var info = new FixSessionInfo
+                {
+                    Id = row.Id,
+                    SenderCompId = row.SenderCompId,
+                    TargetCompId = row.TargetCompId,
+                    Host = row.Host,
+                    Port = row.Port,
+                    BeginString = row.BeginString,
+                    HeartBtInt = row.HeartBtInt,
+                    Behaviour = Enum.TryParse<Behaviour>(row.Behaviour, out var behaviour) ? behaviour : Behaviour.Initiator,
+                    OrderBehaviour = Enum.TryParse<Behaviour>(row.OrderBehaviour, out var orderBehaviour) ? orderBehaviour : Behaviour.Initiator,
+                    LogonBehaviour = Enum.TryParse<Behaviour>(row.LogonBehaviour, out var logonBehaviour) ? logonBehaviour : Behaviour.Initiator,
+                    DefaultApplVerId = row.DefaultApplVerId,
+                    TestRequestDelay = row.TestRequestDelay,
+                    BrokenNewSeqNo = row.BrokenNewSeqNo,
+                    NextExpectedMsgSeqNum = row.NextExpectedMsgSeqNum,
+                    ValidateDataFields = row.ValidateDataFields,
+                    IncomingSeqNum = row.IncomingSeqNum,
+                    OutgoingSeqNum = row.OutgoingSeqNum,
+                    TestRequestId = row.TestRequestId,
+                    FragmentMessages = row.FragmentMessages,
+                    NextOrderId = row.NextOrderId <= 0 ? 1 : row.NextOrderId,
+                    NextExecId = row.NextExecId <= 0 ? 1 : row.NextExecId,
+                    Enabled = false,
+                    SessionState = State.Disconnected
+                };
+
+                CreateSession(info, addCreatedLog: false, persist: false);
+
+                foreach (var log in row.LogEntries.OrderBy(x => x.Timestamp))
+                {
+                    info.LogEntries.Add(new LogEntry(log.Timestamp, log.Level, log.Message));
+                }
+
+                foreach (var history in row.HistoryEntries.OrderBy(x => x.Timestamp))
+                {
+                    var entry = new HistoryEntry(
+                        history.Timestamp,
+                        history.Direction,
+                        history.MsgType,
+                        history.MsgTypeName,
+                        history.SeqNum,
+                        history.Summary,
+                        history.Raw);
+
+                    info.HistoryEntries.Add(entry);
+
+                    if (history.Direction != "Incoming" || string.IsNullOrWhiteSpace(history.Raw))
+                        continue;
+
+                    try
+                    {
+                        var message = new Fix.Message(history.Raw.Replace('|', '\x01'));
+                        info.OrderBook.Process(message);
+                    }
+                    catch
+                    {
+                        // ignore malformed persisted raw history lines
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to load persisted sessions: {ex.Message}");
+        }
+    }
+
+    static void ReleaseNetworkResources(FixSessionInfo info)
+    {
+        info.ListenerCancellation?.Cancel();
+        info.ListenerCancellation?.Dispose();
+        info.ListenerCancellation = null;
+
+        info.TcpClient?.Close();
+        info.TcpClient = null;
+
+        info.TcpListener?.Stop();
+        info.TcpListener = null;
     }
 
     static string FormatSummary(Fix.Message msg)
@@ -284,20 +505,37 @@ public class FixSessionManager
         if (!_sessions.TryGetValue(sessionId, out var info) || info.Session == null)
             return false;
 
-        var order = FindOrder(sessionId, clOrdId);
-        if (order == null)
+        var order = FindOrderForAction(info, clOrdId);
+        var sourceMessage = order == null ? FindIncomingNewOrder(info, clOrdId) : null;
+        if (order == null && sourceMessage == null)
+        {
+            AddLog(info, "Error", $"Acknowledge failed: order {clOrdId} not found");
             return false;
+        }
+
+        var symbol = order?.Symbol
+            ?? sourceMessage?.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.Symbol)?.Value
+            ?? sourceMessage?.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.SecurityID)?.Value;
+        var orderQty = order?.OrderQty ?? ParseLong(sourceMessage?.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.OrderQty)?.Value);
+        var side = order?.Side ?? (sourceMessage?.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.Side) is Fix.Field s ? (Fix.Dictionary.FieldValue?)s : null);
+
+        if (string.IsNullOrEmpty(symbol))
+            symbol = "UNKNOWN";
+        if (orderQty <= 0)
+            orderQty = 1;
 
         var message = new Fix.Message { MsgType = Fix.Dictionary.FIX_5_0SP2.Messages.ExecutionReport.MsgType };
-        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.ClOrdID, order.ClOrdID);
-        if (order.Side is Fix.Dictionary.FieldValue sideValue)
+        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.ClOrdID, clOrdId);
+        if (side is Fix.Dictionary.FieldValue sideValue)
             message.Fields.Set(sideValue);
-        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.Symbol, order.Symbol);
-        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.OrderQty, order.OrderQty);
+        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.Symbol, symbol);
+        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.OrderQty, orderQty);
         message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.OrdStatus.New);
 
-        order.OrderID ??= info.NextOrderId++.ToString();
-        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.OrderID, order.OrderID);
+        var orderId = order?.OrderID ?? info.NextOrderId++.ToString();
+        if (order != null)
+            order.OrderID ??= orderId;
+        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.OrderID, orderId);
         message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.ExecID, info.NextExecId++.ToString());
         message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.LastQty, 0);
         message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.LastPx, 0);
@@ -307,7 +545,7 @@ public class FixSessionManager
         if (info.BeginString != "FIX.4.0")
         {
             message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.ExecType.New);
-            message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.LeavesQty, order.OrderQty);
+            message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.LeavesQty, orderQty);
         }
 
         if (info.BeginString.StartsWith("FIX.4."))
@@ -321,20 +559,37 @@ public class FixSessionManager
         if (!_sessions.TryGetValue(sessionId, out var info) || info.Session == null)
             return false;
 
-        var order = FindOrder(sessionId, clOrdId);
-        if (order == null)
+        var order = FindOrderForAction(info, clOrdId);
+        var sourceMessage = order == null ? FindIncomingNewOrder(info, clOrdId) : null;
+        if (order == null && sourceMessage == null)
+        {
+            AddLog(info, "Error", $"Reject failed: order {clOrdId} not found");
             return false;
+        }
+
+        var symbol = order?.Symbol
+            ?? sourceMessage?.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.Symbol)?.Value
+            ?? sourceMessage?.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.SecurityID)?.Value;
+        var orderQty = order?.OrderQty ?? ParseLong(sourceMessage?.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.OrderQty)?.Value);
+        var side = order?.Side ?? (sourceMessage?.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.Side) is Fix.Field s ? (Fix.Dictionary.FieldValue?)s : null);
+
+        if (string.IsNullOrEmpty(symbol))
+            symbol = "UNKNOWN";
+        if (orderQty <= 0)
+            orderQty = 1;
 
         var message = new Fix.Message { MsgType = Fix.Dictionary.FIX_5_0SP2.Messages.ExecutionReport.MsgType };
-        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.ClOrdID, order.ClOrdID);
-        if (order.Side is Fix.Dictionary.FieldValue sideValue)
+        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.ClOrdID, clOrdId);
+        if (side is Fix.Dictionary.FieldValue sideValue)
             message.Fields.Set(sideValue);
-        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.Symbol, order.Symbol);
-        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.OrderQty, order.OrderQty);
+        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.Symbol, symbol);
+        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.OrderQty, orderQty);
         message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.OrdStatus.Rejected);
 
-        order.OrderID ??= info.NextOrderId++.ToString();
-        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.OrderID, order.OrderID);
+        var orderId = order?.OrderID ?? info.NextOrderId++.ToString();
+        if (order != null)
+            order.OrderID ??= orderId;
+        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.OrderID, orderId);
         message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.ExecID, info.NextExecId++.ToString());
         message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.LastQty, 0);
         message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.LastPx, 0);
@@ -361,26 +616,46 @@ public class FixSessionManager
         if (!_sessions.TryGetValue(sessionId, out var info) || info.Session == null)
             return false;
 
-        var order = FindOrder(sessionId, clOrdId);
-        if (order == null)
+        var order = FindOrderForAction(info, clOrdId);
+        var sourceMessage = order == null ? FindIncomingNewOrder(info, clOrdId) : null;
+        if (order == null && sourceMessage == null)
+        {
+            AddLog(info, "Error", $"Fill failed: order {clOrdId} not found");
             return false;
+        }
 
-        var qty = fillQty ?? (order.LeavesQty ?? order.OrderQty);
-        var price = fillPrice ?? order.Price ?? 0;
-        var cumQty = (order.CumQty ?? 0) + qty;
-        var leavesQty = order.OrderQty - cumQty;
+        var symbol = order?.Symbol
+            ?? sourceMessage?.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.Symbol)?.Value
+            ?? sourceMessage?.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.SecurityID)?.Value;
+        var orderQty = order?.OrderQty ?? ParseLong(sourceMessage?.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.OrderQty)?.Value);
+        var side = order?.Side ?? (sourceMessage?.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.Side) is Fix.Field s ? (Fix.Dictionary.FieldValue?)s : null);
+        var currentCumQty = order?.CumQty ?? 0;
+        var currentLeavesQty = order?.LeavesQty ?? orderQty;
+        var basePrice = order?.Price ?? ParseDecimal(sourceMessage?.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.Price)?.Value) ?? 0;
+
+        if (string.IsNullOrEmpty(symbol))
+            symbol = "UNKNOWN";
+        if (orderQty <= 0)
+            orderQty = 1;
+
+        var qty = fillQty ?? currentLeavesQty;
+        var price = fillPrice ?? basePrice;
+        var cumQty = currentCumQty + qty;
+        var leavesQty = orderQty - cumQty;
         var isFull = leavesQty <= 0;
 
         var message = new Fix.Message { MsgType = Fix.Dictionary.FIX_5_0SP2.Messages.ExecutionReport.MsgType };
-        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.ClOrdID, order.ClOrdID);
-        if (order.Side is Fix.Dictionary.FieldValue sideValue)
+        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.ClOrdID, clOrdId);
+        if (side is Fix.Dictionary.FieldValue sideValue)
             message.Fields.Set(sideValue);
-        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.Symbol, order.Symbol);
-        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.OrderQty, order.OrderQty);
+        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.Symbol, symbol);
+        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.OrderQty, orderQty);
         message.Fields.Set(isFull ? Fix.Dictionary.FIX_5_0SP2.OrdStatus.Filled : Fix.Dictionary.FIX_5_0SP2.OrdStatus.PartiallyFilled);
 
-        order.OrderID ??= info.NextOrderId++.ToString();
-        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.OrderID, order.OrderID);
+        var orderId = order?.OrderID ?? info.NextOrderId++.ToString();
+        if (order != null)
+            order.OrderID ??= orderId;
+        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.OrderID, orderId);
         message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.ExecID, info.NextExecId++.ToString());
         message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.LastQty, qty);
         message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.LastPx, price);
@@ -407,25 +682,44 @@ public class FixSessionManager
         if (!_sessions.TryGetValue(sessionId, out var info) || info.Session == null)
             return false;
 
-        var order = FindOrder(sessionId, clOrdId);
-        if (order == null)
+        var order = FindOrderForAction(info, clOrdId);
+        var sourceMessage = order == null ? FindIncomingNewOrder(info, clOrdId) : null;
+        if (order == null && sourceMessage == null)
+        {
+            AddLog(info, "Error", $"Cancel failed: order {clOrdId} not found");
             return false;
+        }
+
+        var symbol = order?.Symbol
+            ?? sourceMessage?.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.Symbol)?.Value
+            ?? sourceMessage?.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.SecurityID)?.Value;
+        var orderQty = order?.OrderQty ?? ParseLong(sourceMessage?.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.OrderQty)?.Value);
+        var side = order?.Side ?? (sourceMessage?.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.Side) is Fix.Field s ? (Fix.Dictionary.FieldValue?)s : null);
+        var cumQty = order?.CumQty ?? 0;
+        var avgPx = order?.AvgPx ?? 0;
+
+        if (string.IsNullOrEmpty(symbol))
+            symbol = "UNKNOWN";
+        if (orderQty <= 0)
+            orderQty = 1;
 
         var message = new Fix.Message { MsgType = Fix.Dictionary.FIX_5_0SP2.Messages.ExecutionReport.MsgType };
-        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.ClOrdID, order.ClOrdID);
-        if (order.Side is Fix.Dictionary.FieldValue sideValue)
+        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.ClOrdID, clOrdId);
+        if (side is Fix.Dictionary.FieldValue sideValue)
             message.Fields.Set(sideValue);
-        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.Symbol, order.Symbol);
-        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.OrderQty, order.OrderQty);
+        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.Symbol, symbol);
+        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.OrderQty, orderQty);
         message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.OrdStatus.Canceled);
 
-        order.OrderID ??= info.NextOrderId++.ToString();
-        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.OrderID, order.OrderID);
+        var orderId = order?.OrderID ?? info.NextOrderId++.ToString();
+        if (order != null)
+            order.OrderID ??= orderId;
+        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.OrderID, orderId);
         message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.ExecID, info.NextExecId++.ToString());
         message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.LastQty, 0);
         message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.LastPx, 0);
-        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.CumQty, order.CumQty ?? 0);
-        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.AvgPx, order.AvgPx ?? 0);
+        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.CumQty, cumQty);
+        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.AvgPx, avgPx);
 
         if (info.BeginString != "FIX.4.0")
         {
@@ -444,15 +738,23 @@ public class FixSessionManager
         if (!_sessions.TryGetValue(sessionId, out var info) || info.Session == null)
             return false;
 
-        var order = FindOrder(sessionId, clOrdId);
-        if (order == null)
+        var order = FindOrderForAction(info, clOrdId);
+        var sourceMessage = order == null ? FindIncomingNewOrder(info, clOrdId) : null;
+        if (order == null && sourceMessage == null)
+        {
+            AddLog(info, "Error", $"RejectCancel failed: order {clOrdId} not found");
             return false;
+        }
+
+        var ordStatusValue = order?.PreviousOrdStatus?.Value ?? order?.OrdStatus?.Value ?? "0";
+        var orderId = order?.OrderID ?? "NONE";
+        var responseClOrdId = order?.NewClOrdID ?? order?.ClOrdID ?? clOrdId;
 
         var message = new Fix.Message { MsgType = Fix.Dictionary.FIX_5_0SP2.Messages.OrderCancelReject.MsgType };
-        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.ClOrdID, order.NewClOrdID ?? order.ClOrdID);
-        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.OrigClOrdID, order.ClOrdID);
-        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.OrderID, order.OrderID ?? "NONE");
-        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.OrdStatus, order.PreviousOrdStatus?.Value ?? order.OrdStatus?.Value ?? "0");
+        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.ClOrdID, responseClOrdId);
+        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.OrigClOrdID, clOrdId);
+        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.OrderID, orderId);
+        message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.Fields.OrdStatus, ordStatusValue);
         message.Fields.Set(Fix.Dictionary.FIX_5_0SP2.CxlRejResponseTo.OrderCancelRequest);
 
         if (!string.IsNullOrEmpty(reason))
@@ -470,5 +772,86 @@ public class FixSessionManager
                 sb.Append($"{field.Tag}={field.Value}|");
         }
         return sb.ToString();
+    }
+
+    static Order? FindOrderForAction(FixSessionInfo info, string clOrdId)
+    {
+        foreach (var order in info.OrderBook.Orders)
+        {
+            if (order.ClOrdID == clOrdId)
+                return order;
+        }
+
+        foreach (var history in info.HistoryEntries.Where(x => x.Direction == "Incoming").Reverse())
+        {
+            if (string.IsNullOrWhiteSpace(history.Raw))
+                continue;
+
+            try
+            {
+                var message = new Fix.Message(history.Raw.Replace('|', '\x01'));
+                if (message.MsgType != Fix.Dictionary.FIX_5_0SP2.Messages.NewOrderSingle.MsgType)
+                    continue;
+
+                var value = message.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.ClOrdID)?.Value;
+                if (!string.Equals(value, clOrdId, StringComparison.Ordinal))
+                    continue;
+
+                info.OrderBook.Process(message);
+
+                foreach (var hydrated in info.OrderBook.Orders)
+                {
+                    if (hydrated.ClOrdID == clOrdId)
+                        return hydrated;
+                }
+            }
+            catch
+            {
+                // ignore malformed history records
+            }
+        }
+
+        return null;
+    }
+
+    static Fix.Message? FindIncomingNewOrder(FixSessionInfo info, string clOrdId)
+    {
+        foreach (var history in info.HistoryEntries.Where(x => x.Direction == "Incoming").Reverse())
+        {
+            if (string.IsNullOrWhiteSpace(history.Raw))
+                continue;
+
+            try
+            {
+                var message = new Fix.Message(history.Raw.Replace('|', '\x01'));
+                if (message.MsgType != Fix.Dictionary.FIX_5_0SP2.Messages.NewOrderSingle.MsgType)
+                    continue;
+
+                var value = message.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.ClOrdID)?.Value;
+                if (string.Equals(value, clOrdId, StringComparison.Ordinal))
+                    return message;
+            }
+            catch
+            {
+            }
+        }
+
+        return null;
+    }
+
+    static long ParseLong(string? value)
+    {
+        if (long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var result))
+            return result;
+
+        if (decimal.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var decimalValue))
+            return decimal.ToInt64(decimal.Truncate(decimalValue));
+
+        return 0;
+    }
+
+    static decimal? ParseDecimal(string? value)
+    {
+        return decimal.TryParse(value, out var result) ? result : null;
     }
 }

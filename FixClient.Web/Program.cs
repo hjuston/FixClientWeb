@@ -3,28 +3,41 @@ using System.Text;
 using Microsoft.AspNetCore.Http;
 using FixClient.Web.Services;
 using FixClient.Web.Hubs;
+using FixClient.Web.Data;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddRazorPages();
 builder.Services.AddSignalR();
+
+var connectionString = builder.Configuration.GetConnectionString("FixClientWeb")
+    ?? "Host=localhost;Port=5432;Database=fixclientweb;Username=postgres;Password=postgres";
+
+builder.Services.AddDbContextFactory<FixClientWebDbContext>(options =>
+    options.UseNpgsql(connectionString));
+
+builder.Services.AddSingleton<SessionPersistenceStore>();
 builder.Services.AddSingleton<FixSessionManager>();
 
 var app = builder.Build();
+
+var persistenceStore = app.Services.GetRequiredService<SessionPersistenceStore>();
+await persistenceStore.EnsureCreatedAsync();
 
 // Wire up SignalR broadcast from FixSessionManager events
 var sessionManager = app.Services.GetRequiredService<FixSessionManager>();
 var hubContext = app.Services.GetRequiredService<IHubContext<SessionHub>>();
 
 sessionManager.MessageReceived += (sessionId, entry) =>
-    hubContext.Clients.Group(sessionId).SendAsync("MessageReceived", entry);
+    hubContext.Clients.Group(sessionId).SendAsync("MessageReceived", sessionId, entry);
 sessionManager.MessageSent += (sessionId, entry) =>
-    hubContext.Clients.Group(sessionId).SendAsync("MessageSent", entry);
+    hubContext.Clients.Group(sessionId).SendAsync("MessageSent", sessionId, entry);
 sessionManager.LogAdded += (sessionId, entry) =>
-    hubContext.Clients.Group(sessionId).SendAsync("LogAdded", entry);
+    hubContext.Clients.Group(sessionId).SendAsync("LogAdded", sessionId, entry);
 sessionManager.StateChanged += (sessionId, state) =>
-    hubContext.Clients.Group(sessionId).SendAsync("StateChanged", state.ToString());
+    hubContext.Clients.Group(sessionId).SendAsync("StateChanged", sessionId, state.ToString());
 
 app.UseStaticFiles();
 app.MapRazorPages();
@@ -210,9 +223,15 @@ app.MapGet("/api/sessions/{id}/orders", (string id) =>
 // --- API: Acknowledge order ---
 app.MapPost("/api/sessions/{id}/orders/{clOrdId}/acknowledge", (string id, string clOrdId) =>
 {
+    static string Error(FixSessionManager mgr, string sessionId, string fallback)
+    {
+        var session = mgr.GetSession(sessionId);
+        return session?.LogEntries.LastOrDefault(l => l.Level == "Error")?.Message ?? fallback;
+    }
+
     return sessionManager.AcknowledgeOrder(id, clOrdId)
         ? Results.Ok(new { status = "acknowledged" })
-        : Results.BadRequest(new { error = "Failed to acknowledge order" });
+        : Results.BadRequest(new { error = Error(sessionManager, id, "Failed to acknowledge order") });
 });
 
 // --- API: Reject order ---
@@ -224,25 +243,44 @@ app.MapPost("/api/sessions/{id}/orders/{clOrdId}/reject", async (string id, stri
         using var reader = new StreamReader(request.Body, Encoding.UTF8);
         reason = await reader.ReadToEndAsync();
     }
+
+    static string Error(FixSessionManager mgr, string sessionId, string fallback)
+    {
+        var session = mgr.GetSession(sessionId);
+        return session?.LogEntries.LastOrDefault(l => l.Level == "Error")?.Message ?? fallback;
+    }
+
     return sessionManager.RejectOrder(id, clOrdId, reason)
         ? Results.Ok(new { status = "rejected" })
-        : Results.BadRequest(new { error = "Failed to reject order" });
+        : Results.BadRequest(new { error = Error(sessionManager, id, "Failed to reject order") });
 });
 
 // --- API: Fill order ---
 app.MapPost("/api/sessions/{id}/orders/{clOrdId}/fill", (string id, string clOrdId, long? qty, decimal? price) =>
 {
+    static string Error(FixSessionManager mgr, string sessionId, string fallback)
+    {
+        var session = mgr.GetSession(sessionId);
+        return session?.LogEntries.LastOrDefault(l => l.Level == "Error")?.Message ?? fallback;
+    }
+
     return sessionManager.FillOrder(id, clOrdId, qty, price)
         ? Results.Ok(new { status = "filled" })
-        : Results.BadRequest(new { error = "Failed to fill order" });
+        : Results.BadRequest(new { error = Error(sessionManager, id, "Failed to fill order") });
 });
 
 // --- API: Cancel order ---
 app.MapPost("/api/sessions/{id}/orders/{clOrdId}/cancel", (string id, string clOrdId) =>
 {
+    static string Error(FixSessionManager mgr, string sessionId, string fallback)
+    {
+        var session = mgr.GetSession(sessionId);
+        return session?.LogEntries.LastOrDefault(l => l.Level == "Error")?.Message ?? fallback;
+    }
+
     return sessionManager.CancelOrder(id, clOrdId)
         ? Results.Ok(new { status = "cancelled" })
-        : Results.BadRequest(new { error = "Failed to cancel order" });
+        : Results.BadRequest(new { error = Error(sessionManager, id, "Failed to cancel order") });
 });
 
 // --- API: Reject cancel request ---
@@ -254,9 +292,16 @@ app.MapPost("/api/sessions/{id}/orders/{clOrdId}/reject-cancel", async (string i
         using var reader = new StreamReader(request.Body, Encoding.UTF8);
         reason = await reader.ReadToEndAsync();
     }
+
+    static string Error(FixSessionManager mgr, string sessionId, string fallback)
+    {
+        var session = mgr.GetSession(sessionId);
+        return session?.LogEntries.LastOrDefault(l => l.Level == "Error")?.Message ?? fallback;
+    }
+
     return sessionManager.RejectCancelRequest(id, clOrdId, reason)
         ? Results.Ok(new { status = "cancel-rejected" })
-        : Results.BadRequest(new { error = "Failed to reject cancel request" });
+        : Results.BadRequest(new { error = Error(sessionManager, id, "Failed to reject cancel request") });
 });
 
 app.Run();

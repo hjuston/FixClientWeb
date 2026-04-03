@@ -122,14 +122,37 @@ else
                 tbody.insertBefore(row, tbody.firstChild);
             }
 
-            connection.on("MessageReceived", addRow);
-            connection.on("MessageSent", addRow);
-            connection.on("StateChanged", function (state) {
-                var badges = document.querySelectorAll('.badge');
-                // update state badge
+            connection.on("MessageReceived", function (id, entry) {
+                addRow(entry || id);
+            });
+            connection.on("MessageSent", function (id, entry) {
+                addRow(entry || id);
+            });
+            connection.on("StateChanged", function (id, state) {
+                var sessionState = state || id;
+                var header = document.querySelector('.card .card-header');
+                if (!header) return;
+
+                var badge = header.querySelector('.badge');
+                if (!badge) return;
+
+                badge.textContent = sessionState;
+                badge.classList.remove('badge-green', 'badge-gray', 'badge-amber');
+
+                if (sessionState === 'LoggedOn') {
+                    badge.classList.add('badge-green');
+                } else if (sessionState === 'Disconnected') {
+                    badge.classList.add('badge-gray');
+                } else {
+                    badge.classList.add('badge-amber');
+                }
             });
 
             connection.start().then(function () {
+                connection.invoke("JoinSession", sessionId);
+            });
+
+            connection.onreconnected(function () {
                 connection.invoke("JoinSession", sessionId);
             });
         })();

@@ -1,4 +1,5 @@
 using System.Text;
+using System.Linq;
 using FixClient.Web.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -67,7 +68,24 @@ public class OrdersIndexModel : PageModel
         var info = _manager.GetSession(sessionId);
         if (info == null) return;
 
-        foreach (var order in info.OrderBook.Orders)
+        if (info.OrderBook.Orders.Count > 0)
+        {
+            foreach (var order in info.OrderBook.Orders)
+            {
+                Orders.Add(MapOrder(order));
+            }
+            return;
+        }
+
+        var replayBook = RebuildFromHistory(info.HistoryEntries);
+
+        if (replayBook.Orders.Count == 0)
+        {
+            Orders.AddRange(ExtractOrdersFromHistory(info.HistoryEntries));
+            return;
+        }
+
+        foreach (var order in replayBook.Orders)
         {
             Orders.Add(MapOrder(order));
         }
@@ -77,17 +95,122 @@ public class OrdersIndexModel : PageModel
     {
         foreach (var s in _manager.Sessions.Values)
         {
+            var orderCount = s.OrderBook.Orders.Count;
+            if (orderCount == 0)
+            {
+                var replayCount = RebuildFromHistory(s.HistoryEntries).Orders.Count;
+                orderCount = replayCount > 0 ? replayCount : ExtractOrdersFromHistory(s.HistoryEntries).Count;
+            }
+
             AvailableSessions.Add(new SessionSummary(
                 s.Id, s.SenderCompId, s.TargetCompId,
-                s.Behaviour.ToString(), s.OrderBook.Orders.Count));
+                s.Behaviour.ToString(), orderCount));
         }
+    }
+
+    static Fix.OrderBook RebuildFromHistory(IEnumerable<HistoryEntry> entries)
+    {
+        var replayBook = new Fix.OrderBook();
+        foreach (var entry in entries.OrderBy(h => h.Timestamp))
+        {
+            if (entry.Direction != "Incoming" || string.IsNullOrWhiteSpace(entry.Raw))
+                continue;
+
+            try
+            {
+                var message = new Fix.Message(entry.Raw.Replace('|', '\x01'));
+                replayBook.Process(message);
+            }
+            catch
+            {
+            }
+        }
+
+        return replayBook;
+    }
+
+    static List<OrderDisplayInfo> ExtractOrdersFromHistory(IEnumerable<HistoryEntry> entries)
+    {
+        var result = new Dictionary<string, OrderDisplayInfo>();
+
+        foreach (var entry in entries.Where(e => e.Direction == "Incoming").OrderBy(e => e.Timestamp))
+        {
+            if (string.IsNullOrWhiteSpace(entry.Raw))
+                continue;
+
+            try
+            {
+                var message = new Fix.Message(entry.Raw.Replace('|', '\x01'));
+                var clOrdId = message.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.ClOrdID)?.Value;
+                if (string.IsNullOrWhiteSpace(clOrdId))
+                    continue;
+
+                if (message.MsgType == Fix.Dictionary.FIX_5_0SP2.Messages.NewOrderSingle.MsgType)
+                {
+                    var symbol = message.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.Symbol)?.Value
+                        ?? message.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.SecurityID)?.Value
+                        ?? "";
+                    var side = message.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.Side)?.Value ?? "";
+                    var qty = long.TryParse(message.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.OrderQty)?.Value, out var q) ? q : 0;
+                    var price = message.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.Price)?.Value ?? "";
+
+                    result[clOrdId] = new OrderDisplayInfo(
+                        message.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.SenderCompID)?.Value ?? "",
+                        message.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.TargetCompID)?.Value ?? "",
+                        clOrdId,
+                        symbol,
+                        side,
+                        qty,
+                        price,
+                        "Pending",
+                        "0",
+                        "",
+                        qty.ToString(),
+                        entry.Timestamp.ToString("yyyy-MM-dd HH:mm:ss"),
+                        true,
+                        1,
+                        GetStatusBadge(null),
+                        true,
+                        true,
+                        false);
+                    continue;
+                }
+
+                if (message.MsgType == Fix.Dictionary.FIX_5_0SP2.Messages.ExecutionReport.MsgType && result.TryGetValue(clOrdId, out var existing))
+                {
+                    var ordStatus = message.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.OrdStatus)?.Value;
+                    var cumQty = message.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.CumQty)?.Value ?? existing.CumQty;
+                    var avgPx = message.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.AvgPx)?.Value ?? existing.AvgPx;
+                    var leavesQty = message.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.LeavesQty)?.Value ?? existing.LeavesQty;
+
+                    result[clOrdId] = existing with
+                    {
+                        OrdStatus = ordStatus ?? existing.OrdStatus,
+                        CumQty = cumQty,
+                        AvgPx = avgPx,
+                        LeavesQty = leavesQty,
+                        StatusBadge = GetStatusBadge(ordStatus),
+                        IsPending = string.IsNullOrEmpty(ordStatus) || ordStatus == "A",
+                        IsActive = ordStatus is "0" or "1" or "A",
+                        IsPendingCancel = ordStatus == "6",
+                        Active = ordStatus is "0" or "1" or "A",
+                        MessageCount = existing.MessageCount + 1
+                    };
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        return result.Values.OrderByDescending(o => o.SendingTime).ToList();
     }
 
     static OrderDisplayInfo MapOrder(Fix.Order order)
     {
         var ordStatusValue = order.OrdStatus?.Value ?? "";
-        var isPending = order.OrdStatus == null;
-        var isActive = ordStatusValue == "0" || ordStatusValue == "1"; // New or PartiallyFilled
+        var isPending = order.OrdStatus == null || ordStatusValue == "A"; // PendingNew
+        var isActive = ordStatusValue == "0" || ordStatusValue == "1" || ordStatusValue == "A"; // New/PartiallyFilled/PendingNew
         var isPendingCancel = ordStatusValue == "6"; // PendingCancel
 
         return new OrderDisplayInfo(

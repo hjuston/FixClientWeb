@@ -96,7 +96,8 @@ else
                 .withAutomaticReconnect()
                 .build();
 
-            connection.on("LogAdded", function (entry) {
+            connection.on("LogAdded", function (id, entry) {
+                var logEntry = entry || id;
                 var emptyState = document.getElementById('emptyState');
                 if (emptyState) emptyState.style.display = 'none';
                 var table = document.getElementById('logTable');
@@ -104,15 +105,15 @@ else
 
                 var tbody = document.getElementById('logBody');
                 var row = document.createElement('tr');
-                var time = new Date(entry.timestamp);
+                var time = new Date(logEntry.timestamp);
                 var ts = time.toTimeString().split(' ')[0] + '.' + String(time.getMilliseconds()).padStart(3, '0');
-                var level = entry.level || 'Info';
+                var level = logEntry.level || 'Info';
                 var badgeClass = level === 'Error' ? 'badge-red' : level === 'Warn' ? 'badge-amber' : 'badge-blue';
                 var textColor = level === 'Error' ? '#f87171' : level === 'Warn' ? '#fbbf24' : '#e2e8f0';
                 row.innerHTML =
                     '<td style="white-space:nowrap;color:#64748b;">' + ts + '</td>' +
                     '<td><span class="badge ' + badgeClass + '">' + level + '</span></td>' +
-                    '<td style="color:' + textColor + ';">' + (entry.message || '') + '</td>';
+                    '<td style="color:' + textColor + ';">' + (logEntry.message || '') + '</td>';
                 tbody.insertBefore(row, tbody.firstChild);
             });
 

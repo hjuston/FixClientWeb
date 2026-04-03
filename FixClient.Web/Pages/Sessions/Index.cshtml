@@ -20,11 +20,11 @@
                 <div class="grid grid-2">
                     <div class="form-group">
                         <label>SenderCompID</label>
-                        <input type="text" name="SenderCompId" class="form-control" value="SENDER" required />
+                        <input type="text" name="SenderCompId" class="form-control" value="" placeholder="SENDER" />
                     </div>
                     <div class="form-group">
                         <label>TargetCompID</label>
-                        <input type="text" name="TargetCompId" class="form-control" value="TARGET" required />
+                        <input type="text" name="TargetCompId" class="form-control" value="" placeholder="TARGET" />
                     </div>
                 </div>
                 <div class="grid grid-2">
@@ -155,29 +155,30 @@
             {
                 @foreach (var s in Model.SessionList)
                 {
-                    <div class="card" style="margin-bottom:0.75rem;border-color:@(s.State == "Disconnected" ? "#334155" : s.State == "LoggedOn" ? "#166534" : "#854d0e");">
+                    var displayState = s.Behaviour == "Acceptor" && s.State == "Connected" ? "Listening" : s.State;
+                    <div class="card" data-session-id="@s.Id" data-behaviour="@s.Behaviour" style="margin-bottom:0.75rem;border-color:@(s.State == "Disconnected" ? "#334155" : s.State == "LoggedOn" ? "#166534" : "#854d0e");">
                         <div class="card-body" style="padding:0.75rem;">
                             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
                                 <div>
                                     <span class="badge badge-blue">@s.Id</span>
                                     <strong style="margin-left:0.5rem;">@s.SenderCompId ? @s.TargetCompId</strong>
                                 </div>
-                                <span class="badge @(s.State == "Disconnected" ? "badge-gray" : s.State == "LoggedOn" ? "badge-green" : "badge-amber")">@s.State</span>
+                                <span class="badge session-state @(s.State == "Disconnected" ? "badge-gray" : s.State == "LoggedOn" ? "badge-green" : "badge-amber")">@displayState</span>
                             </div>
                             <div style="font-size:0.8rem;color:#64748b;margin-bottom:0.5rem;">
                                 @s.BeginString &middot; @s.Behaviour &middot; @s.Host:@s.Port &middot; HB=@s.HeartBtInt
                             </div>
                             <div class="toolbar">
-                                <form method="post" asp-page-handler="Connect" style="display:inline;">
+                                <form method="post" asp-page-handler="Enable" style="display:inline;">
                                     <input type="hidden" name="SessionId" value="@s.Id" />
-                                    <button type="submit" class="btn btn-primary btn-sm" @(s.State != "Disconnected" ? "disabled" : "")>Connect</button>
+                                    <button type="submit" class="btn btn-primary btn-sm session-enable" @(s.State != "Disconnected" ? "disabled" : "")>Enable</button>
                                 </form>
-                                <form method="post" asp-page-handler="Disconnect" style="display:inline;">
+                                <form method="post" asp-page-handler="Disable" style="display:inline;">
                                     <input type="hidden" name="SessionId" value="@s.Id" />
-                                    <button type="submit" class="btn btn-secondary btn-sm" @(s.State == "Disconnected" ? "disabled" : "")>Disconnect</button>
+                                    <button type="submit" class="btn btn-secondary btn-sm session-disable" @(s.State == "Disconnected" ? "disabled" : "")>Disable</button>
                                 </form>
-                                <a href="/History?sessionId=@s.Id" class="btn btn-secondary btn-sm">History (@s.HistoryCount)</a>
-                                <a href="/Log?sessionId=@s.Id" class="btn btn-secondary btn-sm">Log (@s.LogCount)</a>
+                                <a href="/History?sessionId=@s.Id" class="btn btn-secondary btn-sm">History (<span class="session-history-count">@s.HistoryCount</span>)</a>
+                                <a href="/Log?sessionId=@s.Id" class="btn btn-secondary btn-sm">Log (<span class="session-log-count">@s.LogCount</span>)</a>
                                 <form method="post" asp-page-handler="Remove" style="display:inline;">
                                     <input type="hidden" name="SessionId" value="@s.Id" />
                                     <button type="submit" class="btn btn-secondary btn-sm" style="color:#f87171;">Remove</button>
@@ -190,3 +191,89 @@
         </div>
     </div>
 </div>
+
+@section Scripts {
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.7/signalr.min.js"></script>
+    <script>
+        (function () {
+            var cards = Array.from(document.querySelectorAll('[data-session-id]'));
+            if (cards.length === 0) return;
+
+            var connection = new signalR.HubConnectionBuilder()
+                .withUrl('/hubs/session')
+                .withAutomaticReconnect()
+                .build();
+
+            function updateState(sessionId, state) {
+                var card = document.querySelector('[data-session-id="' + sessionId + '"]');
+                if (!card) return;
+
+                var stateBadge = card.querySelector('.session-state');
+                var enableButton = card.querySelector('.session-enable');
+                var disableButton = card.querySelector('.session-disable');
+
+                var behaviour = card.dataset.behaviour;
+                var displayState = (behaviour === 'Acceptor' && state === 'Connected') ? 'Listening' : state;
+
+                if (stateBadge) {
+                    stateBadge.textContent = displayState;
+                    stateBadge.classList.remove('badge-gray', 'badge-green', 'badge-amber');
+                    if (state === 'Disconnected') {
+                        stateBadge.classList.add('badge-gray');
+                    } else if (state === 'LoggedOn') {
+                        stateBadge.classList.add('badge-green');
+                    } else {
+                        stateBadge.classList.add('badge-amber');
+                    }
+                }
+
+                if (enableButton) enableButton.disabled = state !== 'Disconnected';
+                if (disableButton) disableButton.disabled = state === 'Disconnected';
+
+                if (state === 'Disconnected') {
+                    card.style.borderColor = '#334155';
+                } else if (state === 'LoggedOn') {
+                    card.style.borderColor = '#166534';
+                } else {
+                    card.style.borderColor = '#854d0e';
+                }
+            }
+
+            function incrementCount(sessionId, selector) {
+                var card = document.querySelector('[data-session-id="' + sessionId + '"]');
+                if (!card) return;
+                var el = card.querySelector(selector);
+                if (!el) return;
+                var current = parseInt(el.textContent || '0', 10);
+                el.textContent = String((isNaN(current) ? 0 : current) + 1);
+            }
+
+            connection.on('StateChanged', function (sessionId, state) {
+                updateState(sessionId, state);
+            });
+
+            connection.on('MessageReceived', function (sessionId) {
+                incrementCount(sessionId, '.session-history-count');
+            });
+
+            connection.on('MessageSent', function (sessionId) {
+                incrementCount(sessionId, '.session-history-count');
+            });
+
+            connection.on('LogAdded', function (sessionId) {
+                incrementCount(sessionId, '.session-log-count');
+            });
+
+            function joinAllSessions() {
+                cards.forEach(function (card) {
+                    if (card.dataset.sessionId) {
+                        connection.invoke('JoinSession', card.dataset.sessionId);
+                    }
+                });
+            }
+
+            connection.start().then(joinAllSessions);
+            connection.onreconnected(joinAllSessions);
+        })();
+    </script>
+}

@@ -22,7 +22,7 @@ public class SessionsIndexModel : PageModel
         LoadSessions();
     }
 
-    public IActionResult OnPost(string senderCompId, string targetCompId, string host, int port,
+    public IActionResult OnPost(string? senderCompId, string? targetCompId, string host, int port,
         string beginString, int heartBtInt, string behaviour,
         string? orderBehaviour, string? logonBehaviour, string? defaultApplVerId,
         int testRequestDelay = 2, bool brokenNewSeqNo = false, bool nextExpectedMsgSeqNum = false,
@@ -31,8 +31,8 @@ public class SessionsIndexModel : PageModel
     {
         var info = new FixSessionInfo
         {
-            SenderCompId = senderCompId,
-            TargetCompId = targetCompId,
+            SenderCompId = senderCompId?.Trim() ?? "",
+            TargetCompId = targetCompId?.Trim() ?? "",
             Host = host,
             Port = port,
             BeginString = beginString,
@@ -56,13 +56,13 @@ public class SessionsIndexModel : PageModel
         return RedirectToPage();
     }
 
-    public async Task<IActionResult> OnPostConnectAsync(string sessionId)
+    public async Task<IActionResult> OnPostEnableAsync(string sessionId)
     {
         await _manager.ConnectAsync(sessionId);
         return RedirectToPage();
     }
 
-    public IActionResult OnPostDisconnect(string sessionId)
+    public IActionResult OnPostDisable(string sessionId)
     {
         _manager.Disconnect(sessionId);
         return RedirectToPage();
@@ -87,6 +87,7 @@ public class SessionsIndexModel : PageModel
             HeartBtInt = s.HeartBtInt,
             Behaviour = s.Behaviour.ToString(),
             State = s.SessionState.ToString(),
+            Enabled = s.Enabled,
             HistoryCount = s.HistoryEntries.Count,
             LogCount = s.LogEntries.Count
         }).ToList();
@@ -104,6 +105,7 @@ public class SessionViewModel
     public int HeartBtInt { get; set; }
     public string Behaviour { get; set; } = "";
     public string State { get; set; } = "";
+    public bool Enabled { get; set; }
     public int HistoryCount { get; set; }
     public int LogCount { get; set; }
 }
