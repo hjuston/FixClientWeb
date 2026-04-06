@@ -41,6 +41,7 @@ else
         <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
             <h2>Log — @Model.SessionLabel</h2>
             <div>
+                <a href="/Sessions/Detail?sessionId=@Model.SessionId" class="btn btn-primary btn-sm">Session Workspace</a>
                 <a href="/Sessions" class="btn btn-secondary btn-sm">Back to Sessions</a>
                 <a href="/History?sessionId=@Model.SessionId" class="btn btn-secondary btn-sm">History</a>
             </div>

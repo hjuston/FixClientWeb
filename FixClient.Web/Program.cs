@@ -199,25 +199,115 @@ app.MapGet("/api/sessions/{id}/orders", (string id) =>
     var info = sessionManager.GetSession(id);
     if (info == null) return Results.NotFound();
 
-    var orders = info.OrderBook.Orders.Select(o => new
+    if (info.OrderBook.Orders.Count > 0)
     {
-        o.ClOrdID,
-        o.Symbol,
-        Side = o.Side?.ToString() ?? "",
-        o.OrderQty,
-        Price = o.Price?.ToString("F4") ?? "",
-        OrdStatus = o.OrdStatus?.ToString() ?? "Pending",
-        OrdStatusValue = o.OrdStatus?.Value ?? "",
-        o.OrderID,
-        CumQty = o.CumQty ?? 0,
-        AvgPx = o.AvgPx ?? 0m,
-        LeavesQty = o.LeavesQty ?? o.OrderQty,
-        o.Active,
-        o.SenderCompID,
-        o.TargetCompID,
-        MessageCount = o.Messages.Count
-    });
-    return Results.Ok(orders);
+        var orders = info.OrderBook.Orders.Select(o => new
+        {
+            o.ClOrdID,
+            o.Symbol,
+            Side = o.Side?.ToString() ?? "",
+            o.OrderQty,
+            Price = o.Price?.ToString("F4") ?? "",
+            OrdStatus = o.OrdStatus?.ToString() ?? "Pending",
+            OrdStatusValue = o.OrdStatus?.Value ?? "",
+            o.OrderID,
+            CumQty = o.CumQty ?? 0,
+            AvgPx = o.AvgPx ?? 0m,
+            LeavesQty = o.LeavesQty ?? o.OrderQty,
+            o.Active,
+            o.SenderCompID,
+            o.TargetCompID,
+            MessageCount = o.Messages.Count
+        });
+        return Results.Ok(orders);
+    }
+
+    // Fallback: rebuild from history when OrderBook is empty
+    var replayBook = new Fix.OrderBook();
+    foreach (var entry in info.HistoryEntries.OrderBy(h => h.Timestamp))
+    {
+        if (string.IsNullOrWhiteSpace(entry.Raw))
+            continue;
+        try
+        {
+            var message = new Fix.Message(entry.Raw.Replace('|', '\x01'));
+            replayBook.Process(message);
+        }
+        catch { }
+    }
+
+    if (replayBook.Orders.Count > 0)
+    {
+        var orders = replayBook.Orders.Select(o => new
+        {
+            o.ClOrdID,
+            o.Symbol,
+            Side = o.Side?.ToString() ?? "",
+            o.OrderQty,
+            Price = o.Price?.ToString("F4") ?? "",
+            OrdStatus = o.OrdStatus?.ToString() ?? "Pending",
+            OrdStatusValue = o.OrdStatus?.Value ?? "",
+            o.OrderID,
+            CumQty = o.CumQty ?? 0,
+            AvgPx = o.AvgPx ?? 0m,
+            LeavesQty = o.LeavesQty ?? o.OrderQty,
+            o.Active,
+            o.SenderCompID,
+            o.TargetCompID,
+            MessageCount = o.Messages.Count
+        });
+        return Results.Ok(orders);
+    }
+
+    // Last resort: extract order fields directly from history
+    var extracted = new List<object>();
+    var seen = new Dictionary<string, object>();
+    foreach (var entry in info.HistoryEntries.OrderBy(e => e.Timestamp))
+    {
+        if (string.IsNullOrWhiteSpace(entry.Raw))
+            continue;
+        try
+        {
+            var message = new Fix.Message(entry.Raw.Replace('|', '\x01'));
+            var clOrdId = message.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.ClOrdID)?.Value;
+            if (string.IsNullOrWhiteSpace(clOrdId))
+                continue;
+
+            if (message.MsgType == Fix.Dictionary.FIX_5_0SP2.Messages.NewOrderSingle.MsgType)
+            {
+                var symbol = message.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.Symbol)?.Value
+                    ?? message.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.SecurityID)?.Value
+                    ?? "";
+                var sideField = message.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.Side);
+                var side = sideField != null ? ((Fix.Dictionary.FieldValue?)sideField)?.ToString() ?? sideField.Value : "";
+                long.TryParse(message.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.OrderQty)?.Value, out var qty);
+                var priceField = message.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.Price);
+                var price = priceField != null && decimal.TryParse(priceField.Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var p) ? p.ToString("F4") : "";
+
+                var order = new
+                {
+                    ClOrdID = clOrdId,
+                    Symbol = symbol,
+                    Side = side,
+                    OrderQty = qty,
+                    Price = price,
+                    OrdStatus = "Pending",
+                    OrdStatusValue = "",
+                    OrderID = (string?)null,
+                    CumQty = 0L,
+                    AvgPx = 0m,
+                    LeavesQty = qty,
+                    Active = true,
+                    SenderCompID = message.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.SenderCompID)?.Value ?? "",
+                    TargetCompID = message.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.TargetCompID)?.Value ?? "",
+                    MessageCount = 1
+                };
+                seen[clOrdId] = order;
+            }
+        }
+        catch { }
+    }
+    return Results.Ok(seen.Values);
 });
 
 // --- API: Acknowledge order ---

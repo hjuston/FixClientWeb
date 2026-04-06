@@ -42,7 +42,8 @@ else
             <h2>@Model.SessionLabel</h2>
             <div>
                 <span class="badge @(Model.SessionState == "LoggedOn" ? "badge-green" : Model.SessionState == "Disconnected" ? "badge-gray" : "badge-amber")">@Model.SessionState</span>
-                <a href="/Sessions" class="btn btn-secondary btn-sm" style="margin-left:0.5rem;">Back</a>
+                <a href="/Sessions/Detail?sessionId=@Model.SessionId" class="btn btn-primary btn-sm" style="margin-left:0.5rem;">Session Workspace</a>
+                <a href="/Sessions" class="btn btn-secondary btn-sm" style="margin-left:0.25rem;">Back</a>
             </div>
         </div>
     </div>

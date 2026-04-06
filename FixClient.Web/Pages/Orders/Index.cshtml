@@ -46,8 +46,9 @@ else
         <div class="card-header">
             <h2>Session @Model.SessionId — Order Book</h2>
             <div class="toolbar">
+                <a href="/Sessions/Detail?sessionId=@Model.SessionId" class="btn btn-primary" style="font-size:0.8rem;">Session Workspace</a>
                 <a href="/Orders" class="btn" style="font-size:0.8rem;">Back to Sessions</a>
-                <button class="btn btn-primary" onclick="refreshOrders()" style="font-size:0.8rem;">Refresh</button>
+                <button class="btn btn-secondary" onclick="refreshOrders()" style="font-size:0.8rem;">Refresh</button>
             </div>
         </div>
     </div>
@@ -108,17 +109,17 @@ else
                                     @if (order.IsPending)
                                     {
                                         <button class="btn btn-primary" style="font-size:0.75rem;padding:2px 8px;" onclick="orderAction('@Model.SessionId','@order.ClOrdID','acknowledge')">Ack</button>
-                                        <button class="btn" style="font-size:0.75rem;padding:2px 8px;background:#dc2626;color:white;" onclick="orderAction('@Model.SessionId','@order.ClOrdID','reject')">Reject</button>
+                                        <button class="btn" style="font-size:0.75rem;padding:2px 8px;background:#dc2626;color:white;" onclick="openRejectModal('@Model.SessionId','@order.ClOrdID','reject','Reject Order')">Reject</button>
                                     }
                                     @if (order.IsActive)
                                     {
-                                        <button class="btn" style="font-size:0.75rem;padding:2px 8px;background:#16a34a;color:white;" onclick="orderAction('@Model.SessionId','@order.ClOrdID','fill')">Fill</button>
+                                        <button class="btn" style="font-size:0.75rem;padding:2px 8px;background:#16a34a;color:white;" onclick="openFillModal('@Model.SessionId','@order.ClOrdID','@order.Symbol',@order.OrderQty,@order.LeavesQty,'@order.Price')">Fill</button>
                                         <button class="btn" style="font-size:0.75rem;padding:2px 8px;background:#ea580c;color:white;" onclick="orderAction('@Model.SessionId','@order.ClOrdID','cancel')">Cancel</button>
                                     }
                                     @if (order.IsPendingCancel)
                                     {
                                         <button class="btn" style="font-size:0.75rem;padding:2px 8px;background:#ea580c;color:white;" onclick="orderAction('@Model.SessionId','@order.ClOrdID','cancel')">Ack Cancel</button>
-                                        <button class="btn" style="font-size:0.75rem;padding:2px 8px;background:#dc2626;color:white;" onclick="orderAction('@Model.SessionId','@order.ClOrdID','reject-cancel')">Reject Cancel</button>
+                                        <button class="btn" style="font-size:0.75rem;padding:2px 8px;background:#dc2626;color:white;" onclick="openRejectModal('@Model.SessionId','@order.ClOrdID','reject-cancel','Reject Cancel Request')">Reject Cancel</button>
                                     }
                                 </td>
                             }
@@ -140,7 +141,74 @@ else if (Model.SessionId != null)
 
 @if (Model.SessionId != null)
 {
+    <!-- Fill Order Modal -->
+    <div id="fillModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1000;justify-content:center;align-items:center;">
+        <div class="card" style="width:400px;max-width:90vw;">
+            <div class="card-header">
+                <h2 id="fillModalTitle">Fill Order</h2>
+                <button class="btn" style="font-size:0.8rem;" onclick="closeFillModal()">✕</button>
+            </div>
+            <div class="card-body">
+                <input type="hidden" id="fillSessionId" />
+                <input type="hidden" id="fillClOrdId" />
+                <div class="form-group" style="margin-bottom:0.75rem;">
+                    <label style="font-weight:600;">ClOrdID</label>
+                    <div id="fillClOrdIdDisplay" class="badge badge-blue" style="font-size:0.9rem;"></div>
+                </div>
+                <div class="form-group" style="margin-bottom:0.75rem;">
+                    <label style="font-weight:600;">Symbol</label>
+                    <div id="fillSymbolDisplay" style="color:#64748b;"></div>
+                </div>
+                <div style="display:flex;gap:1rem;margin-bottom:0.75rem;">
+                    <div class="form-group" style="flex:1;">
+                        <label>Quantity</label>
+                        <input type="number" id="fillQty" class="form-control" min="1" step="1" />
+                        <small style="color:#64748b;">LeavesQty: <span id="fillLeavesQty"></span>, OrderQty: <span id="fillOrderQty"></span></small>
+                    </div>
+                    <div class="form-group" style="flex:1;">
+                        <label>Price</label>
+                        <input type="number" id="fillPrice" class="form-control" min="0" step="0.0001" />
+                        <small style="color:#64748b;">Order price: <span id="fillOrderPrice"></span></small>
+                    </div>
+                </div>
+                <div class="toolbar" style="justify-content:flex-end;gap:0.5rem;">
+                    <button class="btn" style="font-size:0.85rem;" onclick="closeFillModal()">Cancel</button>
+                    <button class="btn" style="font-size:0.85rem;background:#f59e0b;color:white;" onclick="submitFill(false)">Partial Fill</button>
+                    <button class="btn" style="font-size:0.85rem;background:#16a34a;color:white;" onclick="submitFill(true)">Full Fill</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Reject Order Modal -->
+    <div id="rejectModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1000;justify-content:center;align-items:center;">
+        <div class="card" style="width:400px;max-width:90vw;">
+            <div class="card-header">
+                <h2 id="rejectModalTitle">Reject Order</h2>
+                <button class="btn" style="font-size:0.8rem;" onclick="closeRejectModal()">✕</button>
+            </div>
+            <div class="card-body">
+                <input type="hidden" id="rejectSessionId" />
+                <input type="hidden" id="rejectClOrdId" />
+                <input type="hidden" id="rejectAction" />
+                <div class="form-group" style="margin-bottom:0.75rem;">
+                    <label style="font-weight:600;">ClOrdID</label>
+                    <div id="rejectClOrdIdDisplay" class="badge badge-blue" style="font-size:0.9rem;"></div>
+                </div>
+                <div class="form-group" style="margin-bottom:0.75rem;">
+                    <label>Reason (optional)</label>
+                    <input type="text" id="rejectReason" class="form-control" placeholder="e.g. Insufficient funds" />
+                </div>
+                <div class="toolbar" style="justify-content:flex-end;gap:0.5rem;">
+                    <button class="btn" style="font-size:0.85rem;" onclick="closeRejectModal()">Cancel</button>
+                    <button class="btn" style="font-size:0.85rem;background:#dc2626;color:white;" onclick="submitReject()">Reject</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
+        // --- Simple actions (acknowledge, cancel) ---
         async function orderAction(sessionId, clOrdId, action) {
             try {
                 const resp = await fetch(`/api/sessions/${sessionId}/orders/${encodeURIComponent(clOrdId)}/${action}`, { method: 'POST' });
@@ -155,6 +223,92 @@ else if (Model.SessionId != null)
             }
         }
 
+        // --- Fill modal ---
+        function openFillModal(sessionId, clOrdId, symbol, orderQty, leavesQty, price) {
+            document.getElementById('fillSessionId').value = sessionId;
+            document.getElementById('fillClOrdId').value = clOrdId;
+            document.getElementById('fillClOrdIdDisplay').textContent = clOrdId;
+            document.getElementById('fillSymbolDisplay').textContent = symbol;
+            document.getElementById('fillOrderQty').textContent = orderQty;
+            document.getElementById('fillLeavesQty').textContent = leavesQty;
+            document.getElementById('fillOrderPrice').textContent = price || '0';
+            document.getElementById('fillQty').value = leavesQty;
+            document.getElementById('fillQty').max = leavesQty;
+            document.getElementById('fillPrice').value = price || '';
+            document.getElementById('fillModal').style.display = 'flex';
+        }
+
+        function closeFillModal() {
+            document.getElementById('fillModal').style.display = 'none';
+        }
+
+        async function submitFill(fullFill) {
+            const sessionId = document.getElementById('fillSessionId').value;
+            const clOrdId = document.getElementById('fillClOrdId').value;
+            const qty = fullFill ? null : parseInt(document.getElementById('fillQty').value);
+            const price = parseFloat(document.getElementById('fillPrice').value);
+
+            let url = `/api/sessions/${sessionId}/orders/${encodeURIComponent(clOrdId)}/fill`;
+            const params = [];
+            if (!fullFill && qty) params.push(`qty=${qty}`);
+            if (!isNaN(price)) params.push(`price=${price}`);
+            if (params.length) url += '?' + params.join('&');
+
+            try {
+                const resp = await fetch(url, { method: 'POST' });
+                if (resp.ok) {
+                    closeFillModal();
+                    location.reload();
+                } else {
+                    const err = await resp.json();
+                    alert(err.error || 'Fill failed');
+                }
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        // --- Reject modal ---
+        function openRejectModal(sessionId, clOrdId, action, title) {
+            document.getElementById('rejectSessionId').value = sessionId;
+            document.getElementById('rejectClOrdId').value = clOrdId;
+            document.getElementById('rejectAction').value = action;
+            document.getElementById('rejectClOrdIdDisplay').textContent = clOrdId;
+            document.getElementById('rejectModalTitle').textContent = title || 'Reject Order';
+            document.getElementById('rejectReason').value = '';
+            document.getElementById('rejectModal').style.display = 'flex';
+        }
+
+        function closeRejectModal() {
+            document.getElementById('rejectModal').style.display = 'none';
+        }
+
+        async function submitReject() {
+            const sessionId = document.getElementById('rejectSessionId').value;
+            const clOrdId = document.getElementById('rejectClOrdId').value;
+            const action = document.getElementById('rejectAction').value;
+            const reason = document.getElementById('rejectReason').value.trim();
+
+            const url = `/api/sessions/${sessionId}/orders/${encodeURIComponent(clOrdId)}/${action}`;
+            try {
+                const resp = await fetch(url, {
+                    method: 'POST',
+                    headers: reason ? { 'Content-Type': 'text/plain' } : {},
+                    body: reason || undefined
+                });
+                if (resp.ok) {
+                    closeRejectModal();
+                    location.reload();
+                } else {
+                    const err = await resp.json();
+                    alert(err.error || 'Reject failed');
+                }
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        // --- Bulk actions ---
         async function ackAll() {
             const pendings = document.querySelectorAll('[id^="order-"]');
             for (const row of pendings) {
@@ -183,6 +337,15 @@ else if (Model.SessionId != null)
         function refreshOrders() {
             location.reload();
         }
+
+        // Close modals on background click
+        document.getElementById('fillModal').addEventListener('click', function(e) { if (e.target === this) closeFillModal(); });
+        document.getElementById('rejectModal').addEventListener('click', function(e) { if (e.target === this) closeRejectModal(); });
+
+        // Close modals on Escape
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') { closeFillModal(); closeRejectModal(); }
+        });
 
         // Auto-refresh every 3 seconds
         setTimeout(() => location.reload(), 3000);

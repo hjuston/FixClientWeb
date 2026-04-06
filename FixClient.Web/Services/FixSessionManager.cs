@@ -126,6 +126,7 @@ public class FixSessionManager
                 int.TryParse(msg.Fields.Find(Fix.Dictionary.FIX_5_0SP2.Fields.MsgSeqNum)?.Value, out var sn) ? sn : 0,
                 FormatSummary(msg), FormatRaw(msg));
             info.HistoryEntries.Add(entry);
+            info.OrderBook.Process((Fix.Message)msg.Clone());
             MessageSent?.Invoke(info.Id, entry);
             PersistSafe(() => _store!.AddHistoryAsync(info.Id, entry));
         };
@@ -157,11 +158,22 @@ public class FixSessionManager
         session.StateChanged += (sender, e) =>
         {
             info.SessionState = e.State;
-            info.Enabled = e.State != State.Disconnected;
 
-            if (e.State == State.Disconnected)
+            if (info.Behaviour == Behaviour.Initiator)
             {
-                ReleaseNetworkResources(info);
+                info.Enabled = e.State != State.Disconnected;
+
+                if (e.State == State.Disconnected)
+                {
+                    ReleaseNetworkResources(info);
+                }
+            }
+            if (info.Behaviour == Behaviour.Acceptor && e.State == State.Disconnected && info.Enabled)
+            {
+                if (info.TcpListener != null && info.ListenerCancellation is { IsCancellationRequested: false } cts)
+                {
+                    _ = Task.Run(() => AcceptConnectionAsync(info, cts.Token));
+                }
             }
 
             StateChanged?.Invoke(info.Id, e.State);

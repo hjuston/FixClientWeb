@@ -1,0 +1,612 @@
+﻿@page
+@model FixClient.Web.Pages.Sessions.DetailModel
+@{
+    ViewData["Title"] = $"Session {Model.SessionId}";
+    var displayState = Model.Behaviour == "Acceptor" && Model.State == "Connected" ? "Listening" : Model.State;
+}
+
+@if (!Model.Found)
+{
+    <div class="card">
+        <div class="card-body empty-state">
+            <p>Session not found. <a href="/Sessions">Back to Sessions</a></p>
+        </div>
+    </div>
+    return;
+}
+
+<!-- Session Header -->
+<div class="card" style="margin-bottom:0;">
+    <div class="card-body" style="padding:0.75rem 1rem;">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem;">
+            <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">
+                <a href="/Sessions" class="btn btn-secondary btn-sm" style="padding:0.2rem 0.5rem;">← Back</a>
+                <span class="badge badge-blue" style="font-size:0.85rem;">@Model.SessionId</span>
+                <strong>@Model.SenderCompId → @Model.TargetCompId</strong>
+                <span style="font-size:0.8rem;color:#64748b;">@Model.BeginString · @Model.Behaviour · @Model.Host:@Model.Port · HB=@Model.HeartBtInt</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:0.5rem;">
+                <span id="sessionStateBadge" class="badge session-state @(Model.State == "Disconnected" ? "badge-gray" : Model.State == "LoggedOn" ? "badge-green" : "badge-amber")">@displayState</span>
+                <form method="post" asp-page-handler="Enable" style="display:inline;">
+                    <input type="hidden" name="SessionId" value="@Model.SessionId" />
+                    <button type="submit" id="btnEnable" class="btn btn-primary btn-sm" @(Model.State != "Disconnected" ? "disabled" : "")>Enable</button>
+                </form>
+                <form method="post" asp-page-handler="Disable" style="display:inline;">
+                    <input type="hidden" name="SessionId" value="@Model.SessionId" />
+                    <button type="submit" id="btnDisable" class="btn btn-secondary btn-sm" @(Model.State == "Disconnected" ? "disabled" : "")>Disable</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Tabs -->
+<div class="tabs" style="margin-top:0;border-radius:0;" id="sessionTabs">
+    <button class="tab active" data-tab="messages">Messages <span id="msgCount" class="badge badge-gray" style="font-size:0.65rem;margin-left:0.3rem;">@Model.HistoryEntries.Count</span></button>
+    <button class="tab" data-tab="orders">Orders <span id="orderCount" class="badge badge-gray" style="font-size:0.65rem;margin-left:0.3rem;">@Model.Orders.Count</span></button>
+    <button class="tab" data-tab="log">Log <span id="logCount" class="badge badge-gray" style="font-size:0.65rem;margin-left:0.3rem;">@Model.LogEntries.Count</span></button>
+    <button class="tab" data-tab="send">Send Message</button>
+</div>
+
+<!-- Messages Tab -->
+<div class="tab-panel active" id="panel-messages">
+    <div style="max-height:calc(100vh - 260px);overflow-y:auto;" id="historyContainer">
+        @if (Model.HistoryEntries.Count == 0)
+        {
+            <div class="empty-state" id="emptyHistory">
+                <p>No messages yet. Enable the session to start receiving messages.</p>
+            </div>
+        }
+        <table class="data-table" id="historyTable" style="@(Model.HistoryEntries.Count == 0 ? "display:none;" : "")">
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>Direction</th>
+                    <th>MsgType</th>
+                    <th>Type</th>
+                    <th>SeqNum</th>
+                    <th>Summary</th>
+                </tr>
+            </thead>
+            <tbody id="historyBody">
+                @foreach (var entry in Model.HistoryEntries)
+                {
+                    <tr class="@(entry.Direction == "Incoming" ? "row-incoming" : "row-outgoing")" title="@entry.Raw">
+                        <td style="white-space:nowrap;">@entry.Timestamp.ToString("HH:mm:ss.fff")</td>
+                        <td><span class="badge @(entry.Direction == "Incoming" ? "badge-blue" : "badge-green")">@entry.Direction</span></td>
+                        <td><code>@entry.MsgType</code></td>
+                        <td>@entry.MsgTypeName</td>
+                        <td>@entry.SeqNum</td>
+                        <td style="font-size:0.8rem;color:#94a3b8;">@entry.Summary</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Orders Tab -->
+<div class="tab-panel" id="panel-orders" style="display:none;">
+    <div style="max-height:calc(100vh - 260px);overflow-y:auto;">
+        @if (Model.Orders.Count == 0)
+        {
+            <div class="empty-state" id="emptyOrders">
+                <p>No orders yet. Waiting for incoming NewOrderSingle messages...</p>
+            </div>
+        }
+        <div id="ordersToolbar" class="toolbar" style="padding:0.5rem 0.75rem;@(Model.Orders.Count == 0 ? "display:none;" : "")">
+            <span class="badge badge-green" id="activeOrderCount">@Model.Orders.Count(o => o.Active) active</span>
+            <span class="badge badge-gray" id="inactiveOrderCount">@Model.Orders.Count(o => !o.Active) inactive</span>
+            <button class="btn btn-primary btn-sm" onclick="ackAll()">Ack All Pending</button>
+            <button class="btn btn-sm" style="background:#dc2626;color:white;" onclick="rejectAll()">Reject All Pending</button>
+            <button class="btn btn-secondary btn-sm" onclick="refreshOrders()">↻ Refresh</button>
+        </div>
+        <table class="data-table" id="ordersTable" style="@(Model.Orders.Count == 0 ? "display:none;" : "")">
+            <thead>
+                <tr>
+                    <th>ClOrdID</th>
+                    <th>Symbol</th>
+                    <th>Side</th>
+                    <th style="text-align:right;">OrderQty</th>
+                    <th style="text-align:right;">Price</th>
+                    <th>OrdStatus</th>
+                    <th style="text-align:right;">CumQty</th>
+                    <th style="text-align:right;">AvgPx</th>
+                    <th style="text-align:right;">LeavesQty</th>
+                    <th>Msgs</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="ordersBody">
+                @foreach (var order in Model.Orders)
+                {
+                    <tr id="order-@order.ClOrdID">
+                        <td><span class="badge badge-blue">@order.ClOrdID</span></td>
+                        <td>@order.Symbol</td>
+                        <td>@order.Side</td>
+                        <td style="text-align:right;">@order.OrderQty</td>
+                        <td style="text-align:right;">@order.Price</td>
+                        <td><span class="badge @order.StatusBadge">@order.OrdStatus</span></td>
+                        <td style="text-align:right;">@order.CumQty</td>
+                        <td style="text-align:right;">@order.AvgPx</td>
+                        <td style="text-align:right;">@order.LeavesQty</td>
+                        <td>@order.MessageCount</td>
+                        <td style="white-space:nowrap;">
+                            @if (order.IsPending)
+                            {
+                                <button class="btn btn-primary btn-sm" style="padding:2px 8px;font-size:0.75rem;" data-action="acknowledge" data-clordid="@order.ClOrdID" onclick="orderAction('@order.ClOrdID','acknowledge')">Ack</button>
+                                <button class="btn btn-sm" style="padding:2px 8px;font-size:0.75rem;background:#dc2626;color:white;" data-action="reject" data-clordid="@order.ClOrdID" onclick="orderAction('@order.ClOrdID','reject')">Reject</button>
+                            }
+                            @if (order.IsActive)
+                            {
+                                <button class="btn btn-sm" style="padding:2px 8px;font-size:0.75rem;background:#16a34a;color:white;" data-action="fill" data-clordid="@order.ClOrdID" onclick="orderAction('@order.ClOrdID','fill',{leavesQty:@order.LeavesQty,price:'@order.Price'})">Fill</button>
+                                <button class="btn btn-sm" style="padding:2px 8px;font-size:0.75rem;background:#ea580c;color:white;" data-action="cancel" data-clordid="@order.ClOrdID" onclick="orderAction('@order.ClOrdID','cancel')">Cancel</button>
+                            }
+                            @if (order.IsPendingCancel)
+                            {
+                                <button class="btn btn-sm" style="padding:2px 8px;font-size:0.75rem;background:#ea580c;color:white;" data-action="cancel" data-clordid="@order.ClOrdID" onclick="orderAction('@order.ClOrdID','cancel')">Ack Cancel</button>
+                                <button class="btn btn-sm" style="padding:2px 8px;font-size:0.75rem;background:#dc2626;color:white;" data-action="reject-cancel" data-clordid="@order.ClOrdID" onclick="orderAction('@order.ClOrdID','reject-cancel')">Reject Cancel</button>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Log Tab -->
+<div class="tab-panel" id="panel-log" style="display:none;">
+    <div style="max-height:calc(100vh - 260px);overflow-y:auto;font-family:'Cascadia Code','Fira Code',monospace;font-size:0.8rem;">
+        @if (Model.LogEntries.Count == 0)
+        {
+            <div class="empty-state" id="emptyLog">
+                <p>No log entries yet.</p>
+            </div>
+        }
+        <table class="data-table" id="logTable" style="@(Model.LogEntries.Count == 0 ? "display:none;" : "")">
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>Level</th>
+                    <th>Message</th>
+                </tr>
+            </thead>
+            <tbody id="logBody">
+                @foreach (var entry in Model.LogEntries)
+                {
+                    <tr>
+                        <td style="white-space:nowrap;color:#64748b;">@entry.Timestamp.ToString("HH:mm:ss.fff")</td>
+                        <td>
+                            <span class="badge @(entry.Level == "Error" ? "badge-red" : entry.Level == "Warn" ? "badge-amber" : "badge-blue")">@entry.Level</span>
+                        </td>
+                        <td style="color:@(entry.Level == "Error" ? "#f87171" : entry.Level == "Warn" ? "#fbbf24" : "#e2e8f0");">@entry.Message</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Send Message Tab -->
+<div class="tab-panel" id="panel-send" style="display:none;">
+    <div class="card" style="margin:0;border-top:none;border-radius:0 0 0.5rem 0.5rem;">
+        <div class="card-body">
+            <div class="form-group">
+                <label>Raw FIX message (use <code>|</code> or <code>^</code> as delimiter)</label>
+                <textarea id="rawMessageInput" class="form-control" rows="4" placeholder="8=FIX.4.4|35=D|49=SENDER|56=TARGET|11=order1|55=AAPL|54=1|38=100|40=2|44=150.00|"></textarea>
+            </div>
+            <div class="toolbar">
+                <button class="btn btn-primary" onclick="sendRawMessage()">Send</button>
+                <span id="sendStatus" style="font-size:0.8rem;color:#64748b;"></span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Order Action Modal -->
+<div class="modal-overlay" id="orderModal" style="display:none;" onclick="if(event.target===this)closeModal()">
+    <div class="modal-dialog">
+        <h3 id="modalTitle"></h3>
+        <div id="modalBody"></div>
+        <div class="modal-actions">
+            <button class="btn btn-secondary btn-sm" onclick="closeModal()">Cancel</button>
+            <button class="btn btn-primary btn-sm" id="modalConfirm">Confirm</button>
+        </div>
+    </div>
+</div>
+
+<!-- Toast container -->
+<div class="toast-container" id="toastContainer"></div>
+
+@section Scripts {
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.7/signalr.min.js"></script>
+    <script>
+        (function () {
+            var sessionId = '@Model.SessionId';
+            var behaviour = '@Model.Behaviour';
+            var ordersDirty = false;
+
+            // --- Toast notifications ---
+            window.showToast = function (msg, type) {
+                var container = document.getElementById('toastContainer');
+                var toast = document.createElement('div');
+                toast.className = 'toast toast-' + (type || 'info');
+                toast.textContent = msg;
+                container.appendChild(toast);
+                setTimeout(function () { toast.remove(); }, 3500);
+            };
+
+            // --- Modal ---
+            window.closeModal = function () {
+                document.getElementById('orderModal').style.display = 'none';
+            };
+            function showModal(title, bodyHtml, confirmLabel, confirmClass, onConfirm) {
+                document.getElementById('modalTitle').textContent = title;
+                document.getElementById('modalBody').innerHTML = bodyHtml;
+                var btn = document.getElementById('modalConfirm');
+                btn.textContent = confirmLabel || 'Confirm';
+                btn.className = 'btn btn-sm ' + (confirmClass || 'btn-primary');
+                btn.onclick = function () { onConfirm(); };
+                document.getElementById('orderModal').style.display = '';
+                var firstInput = document.querySelector('#modalBody input, #modalBody textarea');
+                if (firstInput) firstInput.focus();
+            }
+
+            // --- Tabs ---
+            document.querySelectorAll('#sessionTabs .tab').forEach(function (tab) {
+                tab.addEventListener('click', function () {
+                    document.querySelectorAll('#sessionTabs .tab').forEach(function (t) { t.classList.remove('active'); });
+                    document.querySelectorAll('.tab-panel').forEach(function (p) { p.style.display = 'none'; p.classList.remove('active'); });
+                    tab.classList.add('active');
+                    var panel = document.getElementById('panel-' + tab.dataset.tab);
+                    if (panel) { panel.style.display = ''; panel.classList.add('active'); }
+                });
+            });
+
+            // --- SignalR ---
+            var connection = new signalR.HubConnectionBuilder()
+                .withUrl('/hubs/session')
+                .withAutomaticReconnect()
+                .build();
+
+            function formatTime(dateStr) {
+                var time = new Date(dateStr);
+                return time.toTimeString().split(' ')[0] + '.' + String(time.getMilliseconds()).padStart(3, '0');
+            }
+
+            // Messages
+            function addHistoryRow(entry) {
+                var empty = document.getElementById('emptyHistory');
+                if (empty) empty.style.display = 'none';
+                var table = document.getElementById('historyTable');
+                if (table) table.style.display = '';
+
+                var tbody = document.getElementById('historyBody');
+                var row = document.createElement('tr');
+                row.className = entry.direction === 'Incoming' ? 'row-incoming' : 'row-outgoing';
+                row.title = entry.raw || '';
+                row.innerHTML =
+                    '<td style="white-space:nowrap;">' + formatTime(entry.timestamp) + '</td>' +
+                    '<td><span class="badge ' + (entry.direction === 'Incoming' ? 'badge-blue' : 'badge-green') + '">' + entry.direction + '</span></td>' +
+                    '<td><code>' + (entry.msgType || '') + '</code></td>' +
+                    '<td>' + (entry.msgTypeName || '') + '</td>' +
+                    '<td>' + (entry.seqNum || 0) + '</td>' +
+                    '<td style="font-size:0.8rem;color:#94a3b8;">' + (entry.summary || '') + '</td>';
+                tbody.insertBefore(row, tbody.firstChild);
+
+                var countEl = document.getElementById('msgCount');
+                if (countEl) countEl.textContent = String(parseInt(countEl.textContent || '0', 10) + 1);
+            }
+
+            connection.on('MessageReceived', function (id, entry) {
+                addHistoryRow(entry || id);
+            });
+            connection.on('MessageSent', function (id, entry) {
+                addHistoryRow(entry || id);
+            });
+
+            // Log
+            connection.on('LogAdded', function (id, logEntry) {
+                var e = logEntry || id;
+                var empty = document.getElementById('emptyLog');
+                if (empty) empty.style.display = 'none';
+                var table = document.getElementById('logTable');
+                if (table) table.style.display = '';
+
+                var tbody = document.getElementById('logBody');
+                var row = document.createElement('tr');
+                var level = e.level || 'Info';
+                var badgeClass = level === 'Error' ? 'badge-red' : level === 'Warn' ? 'badge-amber' : 'badge-blue';
+                var textColor = level === 'Error' ? '#f87171' : level === 'Warn' ? '#fbbf24' : '#e2e8f0';
+                row.innerHTML =
+                    '<td style="white-space:nowrap;color:#64748b;">' + formatTime(e.timestamp) + '</td>' +
+                    '<td><span class="badge ' + badgeClass + '">' + level + '</span></td>' +
+                    '<td style="color:' + textColor + ';">' + (e.message || '') + '</td>';
+                tbody.insertBefore(row, tbody.firstChild);
+
+                var countEl = document.getElementById('logCount');
+                if (countEl) countEl.textContent = String(parseInt(countEl.textContent || '0', 10) + 1);
+            });
+
+            // State
+            connection.on('StateChanged', function (id, state) {
+                var sessionState = state || id;
+                var badge = document.getElementById('sessionStateBadge');
+                if (badge) {
+                    var displayState = (behaviour === 'Acceptor' && sessionState === 'Connected') ? 'Listening' : sessionState;
+                    badge.textContent = displayState;
+                    badge.classList.remove('badge-green', 'badge-gray', 'badge-amber');
+                    if (sessionState === 'LoggedOn') badge.classList.add('badge-green');
+                    else if (sessionState === 'Disconnected') badge.classList.add('badge-gray');
+                    else badge.classList.add('badge-amber');
+                }
+
+                var btnEnable = document.getElementById('btnEnable');
+                var btnDisable = document.getElementById('btnDisable');
+                if (btnEnable) btnEnable.disabled = sessionState !== 'Disconnected';
+                if (btnDisable) btnDisable.disabled = sessionState === 'Disconnected';
+            });
+
+            connection.start().then(function () {
+                connection.invoke('JoinSession', sessionId);
+            });
+            connection.onreconnected(function () {
+                connection.invoke('JoinSession', sessionId);
+            });
+
+            // --- Order Actions ---
+            function executeOrderAction(clOrdId, action, opts) {
+                opts = opts || {};
+                var url = '/api/sessions/' + sessionId + '/orders/' + encodeURIComponent(clOrdId) + '/' + action;
+                var params = [];
+                if (opts.qty != null) params.push('qty=' + opts.qty);
+                if (opts.price != null) params.push('price=' + opts.price);
+                if (params.length) url += '?' + params.join('&');
+
+                var fetchOpts = { method: 'POST' };
+                if (opts.body) {
+                    fetchOpts.headers = { 'Content-Type': 'text/plain' };
+                    fetchOpts.body = opts.body;
+                }
+
+                return fetch(url, fetchOpts).then(function (resp) {
+                    if (resp.ok) {
+                        showToast(action.charAt(0).toUpperCase() + action.slice(1) + ' sent for ' + clOrdId, 'success');
+                        setTimeout(refreshOrders, 200);
+                        return true;
+                    } else {
+                        return resp.json().then(function (err) {
+                            showToast(err.error || 'Action failed', 'error');
+                            return false;
+                        });
+                    }
+                }).catch(function (e) {
+                    showToast('Error: ' + e.message, 'error');
+                    return false;
+                });
+            }
+
+            window.orderAction = function (clOrdId, action, orderData) {
+                if (action === 'acknowledge' || action === 'cancel') {
+                    executeOrderAction(clOrdId, action);
+                    return;
+                }
+
+                if (action === 'reject') {
+                    showModal('Reject Order ' + clOrdId,
+                        '<div class="form-group"><label>Reason (optional)</label><textarea id="modalRejectReason" rows="2" placeholder="Rejection reason..."></textarea></div>',
+                        'Reject', 'btn-sm', function () {
+                            var reason = document.getElementById('modalRejectReason').value.trim();
+                            executeOrderAction(clOrdId, 'reject', { body: reason || undefined });
+                            closeModal();
+                        });
+                    document.getElementById('modalConfirm').style.cssText = 'background:#dc2626;color:white;border:none;';
+                    return;
+                }
+
+                if (action === 'fill') {
+                    var leavesQty = orderData && orderData.leavesQty ? orderData.leavesQty : '';
+                    var orderPrice = orderData && orderData.price ? orderData.price : '';
+                    showModal('Fill Order ' + clOrdId,
+                        '<div class="form-group"><label>Quantity (empty = full fill)</label><input type="number" id="modalFillQty" min="1" placeholder="' + (leavesQty || 'Full fill') + '" value=""></div>' +
+                        '<div class="form-group"><label>Price</label><input type="number" id="modalFillPrice" step="0.0001" placeholder="' + (orderPrice || 'Order price') + '" value=""></div>',
+                        'Fill', 'btn-sm', function () {
+                            var qty = document.getElementById('modalFillQty').value.trim();
+                            var price = document.getElementById('modalFillPrice').value.trim();
+                            executeOrderAction(clOrdId, 'fill', {
+                                qty: qty ? parseInt(qty) : undefined,
+                                price: price ? parseFloat(price) : undefined
+                            });
+                            closeModal();
+                        });
+                    document.getElementById('modalConfirm').style.cssText = 'background:#16a34a;color:white;border:none;';
+                    return;
+                }
+
+                if (action === 'reject-cancel') {
+                    showModal('Reject Cancel for ' + clOrdId,
+                        '<div class="form-group"><label>Reason (optional)</label><textarea id="modalRejectCancelReason" rows="2" placeholder="Reject cancel reason..."></textarea></div>',
+                        'Reject Cancel', 'btn-sm', function () {
+                            var reason = document.getElementById('modalRejectCancelReason').value.trim();
+                            executeOrderAction(clOrdId, 'reject-cancel', { body: reason || undefined });
+                            closeModal();
+                        });
+                    document.getElementById('modalConfirm').style.cssText = 'background:#dc2626;color:white;border:none;';
+                    return;
+                }
+
+                // fallback: execute directly
+                executeOrderAction(clOrdId, action);
+            };
+
+            window.ackAll = async function () {
+                var rows = document.querySelectorAll('#ordersBody tr');
+                var count = 0;
+                for (var row of rows) {
+                    var btn = row.querySelector('button[data-action="acknowledge"]');
+                    if (btn) {
+                        var clOrdId = btn.getAttribute('data-clordid');
+                        await executeOrderAction(clOrdId, 'acknowledge');
+                        count++;
+                        await new Promise(function (r) { setTimeout(r, 150); });
+                    }
+                }
+                if (count === 0) showToast('No pending orders to acknowledge', 'info');
+            };
+
+            window.rejectAll = async function () {
+                var rows = document.querySelectorAll('#ordersBody tr');
+                var pending = [];
+                for (var row of rows) {
+                    var btn = row.querySelector('button[data-action="reject"]');
+                    if (btn) pending.push(btn.getAttribute('data-clordid'));
+                }
+                if (pending.length === 0) {
+                    showToast('No pending orders to reject', 'info');
+                    return;
+                }
+                showModal('Reject All Pending (' + pending.length + ' orders)',
+                    '<div class="form-group"><label>Reason (optional, applies to all)</label><textarea id="modalRejectAllReason" rows="2" placeholder="Rejection reason..."></textarea></div>',
+                    'Reject All', 'btn-sm', async function () {
+                        var reason = document.getElementById('modalRejectAllReason').value.trim();
+                        closeModal();
+                        for (var clOrdId of pending) {
+                            await executeOrderAction(clOrdId, 'reject', { body: reason || undefined });
+                            await new Promise(function (r) { setTimeout(r, 150); });
+                        }
+                    });
+                document.getElementById('modalConfirm').style.cssText = 'background:#dc2626;color:white;border:none;';
+            };
+
+            function buildActionButtons(o) {
+                var statusVal = o.ordStatusValue || '';
+                var isPending = !statusVal || statusVal === 'A';
+                var isActive = statusVal === '0' || statusVal === '1' || statusVal === 'A';
+                var isPendingCancel = statusVal === '6';
+                var id = o.clOrdID;
+                var escaped = id.replace(/'/g, "\\'");
+                var dataStr = JSON.stringify({ leavesQty: o.leavesQty, price: o.price }).replace(/"/g, '&quot;');
+                var actions = '';
+
+                if (isPending) {
+                    actions += '<button class="btn btn-primary btn-sm" style="padding:2px 8px;font-size:0.75rem;" data-action="acknowledge" data-clordid="' + id + '" onclick="orderAction(\'' + escaped + '\',\'acknowledge\')">Ack</button> ';
+                    actions += '<button class="btn btn-sm" style="padding:2px 8px;font-size:0.75rem;background:#dc2626;color:white;" data-action="reject" data-clordid="' + id + '" onclick="orderAction(\'' + escaped + '\',\'reject\')">Reject</button> ';
+                }
+                if (isActive) {
+                    actions += '<button class="btn btn-sm" style="padding:2px 8px;font-size:0.75rem;background:#16a34a;color:white;" data-action="fill" data-clordid="' + id + '" onclick="orderAction(\'' + escaped + '\',\'fill\',' + JSON.stringify({ leavesQty: o.leavesQty, price: o.price }) + ')">Fill</button> ';
+                    actions += '<button class="btn btn-sm" style="padding:2px 8px;font-size:0.75rem;background:#ea580c;color:white;" data-action="cancel" data-clordid="' + id + '" onclick="orderAction(\'' + escaped + '\',\'cancel\')">Cancel</button> ';
+                }
+                if (isPendingCancel) {
+                    actions += '<button class="btn btn-sm" style="padding:2px 8px;font-size:0.75rem;background:#ea580c;color:white;" data-action="cancel" data-clordid="' + id + '" onclick="orderAction(\'' + escaped + '\',\'cancel\')">Ack Cancel</button> ';
+                    actions += '<button class="btn btn-sm" style="padding:2px 8px;font-size:0.75rem;background:#dc2626;color:white;" data-action="reject-cancel" data-clordid="' + id + '" onclick="orderAction(\'' + escaped + '\',\'reject-cancel\')">Reject Cancel</button> ';
+                }
+
+                return actions;
+            }
+
+            window.refreshOrders = function () {
+                ordersDirty = false;
+                fetch('/api/sessions/' + sessionId + '/orders')
+                    .then(function (r) { return r.json(); })
+                    .then(function (orders) {
+                        var tbody = document.getElementById('ordersBody');
+                        var table = document.getElementById('ordersTable');
+                        var toolbar = document.getElementById('ordersToolbar');
+                        var empty = document.getElementById('emptyOrders');
+                        var countEl = document.getElementById('orderCount');
+
+                        if (!orders || orders.length === 0) {
+                            if (table) table.style.display = 'none';
+                            if (toolbar) toolbar.style.display = 'none';
+                            if (empty) empty.style.display = '';
+                            if (countEl) countEl.textContent = '0';
+                            return;
+                        }
+
+                        if (empty) empty.style.display = 'none';
+                        if (table) table.style.display = '';
+                        if (toolbar) toolbar.style.display = '';
+                        if (countEl) countEl.textContent = String(orders.length);
+
+                        var activeCount = 0, inactiveCount = 0;
+                        tbody.innerHTML = '';
+                        orders.forEach(function (o) {
+                            if (o.active) activeCount++; else inactiveCount++;
+                            var statusVal = o.ordStatusValue || '';
+                            var statusBadge = statusVal === '0' ? 'badge-blue' : statusVal === '1' ? 'badge-amber' : statusVal === '2' ? 'badge-green' : statusVal === '4' || statusVal === '8' ? 'badge-red' : statusVal === '6' ? 'badge-amber' : 'badge-gray';
+                            var statusLabel = o.ordStatus || 'Pending';
+
+                            var row = document.createElement('tr');
+                            row.id = 'order-' + o.clOrdID;
+                            row.innerHTML =
+                                '<td><span class="badge badge-blue">' + o.clOrdID + '</span></td>' +
+                                '<td>' + (o.symbol || '') + '</td>' +
+                                '<td>' + (o.side || '') + '</td>' +
+                                '<td style="text-align:right;">' + (o.orderQty || 0) + '</td>' +
+                                '<td style="text-align:right;">' + (o.price || '') + '</td>' +
+                                '<td><span class="badge ' + statusBadge + '">' + statusLabel + '</span></td>' +
+                                '<td style="text-align:right;">' + (o.cumQty || 0) + '</td>' +
+                                '<td style="text-align:right;">' + (o.avgPx || 0) + '</td>' +
+                                '<td style="text-align:right;">' + (o.leavesQty || 0) + '</td>' +
+                                '<td>' + (o.messageCount || 0) + '</td>' +
+                                '<td style="white-space:nowrap;">' + buildActionButtons(o) + '</td>';
+                            tbody.appendChild(row);
+                        });
+
+                        var activeEl = document.getElementById('activeOrderCount');
+                        var inactiveEl = document.getElementById('inactiveOrderCount');
+                        if (activeEl) activeEl.textContent = activeCount + ' active';
+                        if (inactiveEl) inactiveEl.textContent = inactiveCount + ' inactive';
+                    });
+            };
+
+            // Auto-refresh orders when a message is received/sent
+            connection.on('MessageReceived', function () {
+                var ordersPanel = document.getElementById('panel-orders');
+                if (ordersPanel && ordersPanel.classList.contains('active')) {
+                    setTimeout(refreshOrders, 300);
+                } else {
+                    ordersDirty = true;
+                }
+            });
+            connection.on('MessageSent', function () {
+                var ordersPanel = document.getElementById('panel-orders');
+                if (ordersPanel && ordersPanel.classList.contains('active')) {
+                    setTimeout(refreshOrders, 300);
+                } else {
+                    ordersDirty = true;
+                }
+            });
+
+            // Refresh orders when switching to orders tab (always, or if dirty)
+            document.querySelector('[data-tab="orders"]').addEventListener('click', function () {
+                setTimeout(refreshOrders, 100);
+            });
+
+            // --- Send Message ---
+            window.sendRawMessage = function () {
+                var input = document.getElementById('rawMessageInput').value.trim();
+                var status = document.getElementById('sendStatus');
+                if (!input) {
+                    if (status) status.textContent = 'Enter a message first';
+                    return;
+                }
+
+                connection.invoke('SendFixMessage', sessionId, input)
+                    .then(function () {
+                        if (status) { status.textContent = 'Sent!'; status.style.color = '#4ade80'; }
+                        setTimeout(function () { if (status) { status.textContent = ''; status.style.color = '#64748b'; } }, 2000);
+                    })
+                    .catch(function (err) {
+                        if (status) { status.textContent = 'Error: ' + err.message; status.style.color = '#f87171'; }
+                    });
+            };
+
+            // ESC to close modal
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') closeModal();
+            });
+        })();
+    </script>
+}

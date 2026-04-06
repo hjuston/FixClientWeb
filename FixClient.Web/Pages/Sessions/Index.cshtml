@@ -169,9 +169,10 @@
                                 @s.BeginString &middot; @s.Behaviour &middot; @s.Host:@s.Port &middot; HB=@s.HeartBtInt
                             </div>
                             <div class="toolbar">
+                                <a href="/Sessions/Detail?sessionId=@s.Id" class="btn btn-primary btn-sm">Open</a>
                                 <form method="post" asp-page-handler="Enable" style="display:inline;">
                                     <input type="hidden" name="SessionId" value="@s.Id" />
-                                    <button type="submit" class="btn btn-primary btn-sm session-enable" @(s.State != "Disconnected" ? "disabled" : "")>Enable</button>
+                                    <button type="submit" class="btn btn-secondary btn-sm session-enable" @(s.State != "Disconnected" ? "disabled" : "")>Enable</button>
                                 </form>
                                 <form method="post" asp-page-handler="Disable" style="display:inline;">
                                     <input type="hidden" name="SessionId" value="@s.Id" />

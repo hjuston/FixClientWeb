@@ -282,6 +282,11 @@ pre {
 .tab:hover { color: #e2e8f0; }
 .tab.active { color: #38bdf8; border-bottom-color: #38bdf8; }
 
+/* === Tab Panels === */
+.tab-panel { background: #1e293b; border: 1px solid #334155; border-top: none; border-radius: 0 0 0.5rem 0.5rem; padding: 0; }
+.tab-panel .data-table { margin: 0; }
+.tab-panel .empty-state { padding: 2rem; }
+
 /* === Inline field values table === */
 .values-table { margin-top: 0.5rem; }
 .values-table th { font-size: 0.65rem; }
@@ -298,3 +303,69 @@ pre {
     animation: spin 0.6s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* === Modal overlay === */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+.modal-dialog {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 0.5rem;
+    padding: 1.25rem;
+    min-width: 340px;
+    max-width: 440px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+}
+.modal-dialog h3 {
+    margin: 0 0 1rem 0;
+    font-size: 0.95rem;
+    color: #e2e8f0;
+}
+.modal-dialog .form-group { margin-bottom: 0.75rem; }
+.modal-dialog .form-group label { display: block; font-size: 0.78rem; color: #94a3b8; margin-bottom: 0.25rem; }
+.modal-dialog .form-group input,
+.modal-dialog .form-group textarea {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.4rem 0.6rem;
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 0.3rem;
+    color: #e2e8f0;
+    font-size: 0.85rem;
+    font-family: inherit;
+}
+.modal-dialog .form-group input:focus,
+.modal-dialog .form-group textarea:focus { outline: none; border-color: #38bdf8; }
+.modal-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; }
+
+/* === Toast notifications === */
+.toast-container {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    z-index: 1100;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+.toast {
+    padding: 0.6rem 1rem;
+    border-radius: 0.4rem;
+    font-size: 0.8rem;
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    animation: toastIn 0.2s ease-out;
+    max-width: 360px;
+}
+.toast-success { background: #16a34a; }
+.toast-error { background: #dc2626; }
+.toast-info { background: #2563eb; }
+@keyframes toastIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
